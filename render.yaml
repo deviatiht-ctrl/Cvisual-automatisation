@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: cvisual-whatsapp-gateway
+    env: docker
+    dockerfilePath: Dockerfile
+    plan: starter
+    region: oregon
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_URL
+        value: https://oykuhhogcdbmoybskexd.supabase.co
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ADMIN_EMAILS
+        value: laurorejeanclarens0@gmail.com
+      - key: FAST_LANE_CONCURRENCY
+        value: "5"
+      - key: SLOW_LANE_INTERVAL_MIN_MS
+        value: "600000"
+      - key: SLOW_LANE_JITTER_MAX_MS
+        value: "360000"
+      - key: MAX_REMINDERS_PER_DAY
+        value: "25"
+      - key: BATCH_PAUSE_EVERY_N
+        value: "5"
+      - key: BATCH_PAUSE_MS
+        value: "600000"
+      - key: AUTH_DATA_DIR
+        value: /app/.wwebjs_auth
