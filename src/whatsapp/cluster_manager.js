@@ -26,11 +26,13 @@ export class ClusterManager {
       dbAccounts = await db.listAccounts();
     }
 
-    // On startup, start primary line 1 to keep RAM footprint low (< 220MB)
-    const primaryAccount = dbAccounts.find(a => a.account_index === 1) || dbAccounts[0];
-    if (primaryAccount && primaryAccount.is_enabled) {
-      await this.registerAndStartAccount(primaryAccount.account_index, primaryAccount.label);
-    }
+    // On startup, start primary line 1 after a short delay so HTTP server binds and passes health check immediately
+    setTimeout(async () => {
+      const primaryAccount = dbAccounts.find(a => a.account_index === 1) || dbAccounts[0];
+      if (primaryAccount && primaryAccount.is_enabled) {
+        await this.registerAndStartAccount(primaryAccount.account_index, primaryAccount.label);
+      }
+    }, 4000);
 
     // Start dual-lane background processors
     this.startDualLaneEngines();
