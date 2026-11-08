@@ -11,7 +11,7 @@ import { applySpintaxAndHashShield } from '../shield.js';
 const MODERN_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
 
 // Stable remote WhatsApp Web HTML version (immediate fallback, no blocking GitHub API delay)
-const STABLE_REMOTE_WA_URL = 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1018940866-alpha.html';
+const STABLE_REMOTE_WA_URL = 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1053557623-alpha.html';
 let cachedRemoteVersionUrl = STABLE_REMOTE_WA_URL;
 
 // Asynchronously check for newer version in background without blocking startup
@@ -214,7 +214,7 @@ export class WhatsAppAccountInstance extends EventEmitter {
   }
 
   isReady() {
-    return this.status === 'READY' && this.client !== null;
+    return this.status === 'READY' && this.client !== null && Boolean(this.phoneNumber);
   }
 
   async handleCrashRecovery(error) {
