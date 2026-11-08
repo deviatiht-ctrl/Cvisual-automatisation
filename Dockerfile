@@ -4,7 +4,6 @@ FROM node:20-bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
-ENV NODE_OPTIONS="--max-old-space-size=160"
 
 # Install Chromium, fonts, and core graphic dependencies required by Puppeteer
 RUN apt-get update && apt-get install -y --no-install-recommends \

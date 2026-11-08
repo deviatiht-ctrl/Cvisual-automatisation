@@ -74,7 +74,7 @@ app.use((err, req, res, next) => {
 
 // Standalone Server Startup (Skipped on Vercel serverless)
 if (!process.env.VERCEL) {
-  const server = app.listen(config.port, async () => {
+  const server = app.listen(config.port, '0.0.0.0', async () => {
     console.log(`================================================================`);
     console.log(`🚀 CVISUAL STANDALONE MULTI-TENANT WHATSAPP GATEWAY & SAAS`);
     console.log(`📡 Server running on: http://localhost:${config.port}`);
