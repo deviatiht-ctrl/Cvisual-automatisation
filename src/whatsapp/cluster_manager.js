@@ -26,10 +26,10 @@ export class ClusterManager {
       dbAccounts = await db.listAccounts();
     }
 
-    for (const acc of dbAccounts) {
-      if (acc.is_enabled) {
-        await this.registerAndStartAccount(acc.account_index, acc.label);
-      }
+    // On startup, start primary line 1 to keep RAM footprint low (< 220MB)
+    const primaryAccount = dbAccounts.find(a => a.account_index === 1) || dbAccounts[0];
+    if (primaryAccount && primaryAccount.is_enabled) {
+      await this.registerAndStartAccount(primaryAccount.account_index, primaryAccount.label);
     }
 
     // Start dual-lane background processors
@@ -54,7 +54,13 @@ export class ClusterManager {
   }
 
   getAccount(accountIndex) {
-    return this.accounts.get(parseInt(accountIndex, 10)) || null;
+    const idx = parseInt(accountIndex, 10);
+    if (this.accounts.has(idx)) {
+      return this.accounts.get(idx);
+    }
+    // Lazy on-demand start
+    this.registerAndStartAccount(idx, `SIM Liy ${idx}`).catch(() => {});
+    return this.accounts.get(idx) || null;
   }
 
   getAllAccounts() {

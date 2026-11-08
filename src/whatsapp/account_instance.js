@@ -106,9 +106,15 @@ export class WhatsAppAccountInstance extends EventEmitter {
       '--no-first-run',
       '--no-zygote',
       '--disable-gpu',
+      '--disable-software-rasterizer',
       '--disable-blink-features=AutomationControlled',
       '--hide-scrollbars',
-      '--mute-audio'
+      '--mute-audio',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-default-apps',
+      '--disable-sync',
+      '--js-flags=--max-old-space-size=256'
     ];
 
     const puppeteerOptions = {
