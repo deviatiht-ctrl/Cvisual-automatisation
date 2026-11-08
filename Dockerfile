@@ -51,7 +51,7 @@ WORKDIR /app
 
 # Copy package manifests first for caching layers
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # Copy source code and frontend assets
 COPY . .
