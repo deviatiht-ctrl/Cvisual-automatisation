@@ -386,6 +386,96 @@ router.get('/admin/overview', requireAdmin, async (req, res) => {
 });
 
 /**
+ * GET /api/v1/admin/settings
+ * Récupère les paramètres de temporisation et règles anti-ban
+ */
+router.get('/admin/settings', requireAdmin, (req, res) => {
+  res.json({
+    ok: true,
+    settings: {
+      dailyReminderLimit: config.engine.slowLane.dailyReminderLimit,
+      slowLaneIntervalMinutes: Math.round(config.engine.slowLane.minIntervalMs / 60000),
+      slowLaneJitterSeconds: Math.round(config.engine.slowLane.maxJitterMs / 1000),
+      batchPauseThreshold: config.engine.slowLane.batchPauseThreshold,
+      batchPauseMinutes: Math.round(config.engine.slowLane.batchPauseDurationMs / 60000),
+      fastLaneMinSeconds: Math.round(config.engine.fastLane.minDelayMs / 1000),
+      fastLaneMaxSeconds: Math.round(config.engine.fastLane.maxDelayMs / 1000)
+    }
+  });
+});
+
+/**
+ * POST /api/v1/admin/settings
+ * Met à jour les délais et plafonds d'envoi en direct
+ */
+router.post('/admin/settings', requireAdmin, async (req, res) => {
+  try {
+    const {
+      dailyReminderLimit,
+      slowLaneIntervalMinutes,
+      slowLaneJitterSeconds,
+      batchPauseThreshold,
+      batchPauseMinutes,
+      fastLaneMinSeconds,
+      fastLaneMaxSeconds
+    } = req.body;
+
+    if (dailyReminderLimit !== undefined) {
+      config.engine.slowLane.dailyReminderLimit = parseInt(dailyReminderLimit, 10);
+      // Mettre à jour également la limite sur toutes les lignes en DB
+      const accounts = await db.listAccounts();
+      for (const acc of accounts) {
+        await db.updateAccountStatus(acc.account_index, acc.service_status || 'DISCONNECTED', {
+          daily_reminder_limit: parseInt(dailyReminderLimit, 10)
+        });
+      }
+    }
+
+    if (slowLaneIntervalMinutes !== undefined) {
+      config.engine.slowLane.minIntervalMs = parseInt(slowLaneIntervalMinutes, 10) * 60000;
+    }
+
+    if (slowLaneJitterSeconds !== undefined) {
+      config.engine.slowLane.maxJitterMs = parseInt(slowLaneJitterSeconds, 10) * 1000;
+    }
+
+    if (batchPauseThreshold !== undefined) {
+      config.engine.slowLane.batchPauseThreshold = parseInt(batchPauseThreshold, 10);
+    }
+
+    if (batchPauseMinutes !== undefined) {
+      config.engine.slowLane.batchPauseDurationMs = parseInt(batchPauseMinutes, 10) * 60000;
+    }
+
+    if (fastLaneMinSeconds !== undefined) {
+      config.engine.fastLane.minDelayMs = parseInt(fastLaneMinSeconds, 10) * 1000;
+    }
+
+    if (fastLaneMaxSeconds !== undefined) {
+      config.engine.fastLane.maxDelayMs = parseInt(fastLaneMaxSeconds, 10) * 1000;
+    }
+
+    console.log('[Admin Settings] Règles de temporisation mises à jour avec succès.');
+
+    res.json({
+      ok: true,
+      message: 'Paramètres mis à jour avec succès.',
+      settings: {
+        dailyReminderLimit: config.engine.slowLane.dailyReminderLimit,
+        slowLaneIntervalMinutes: Math.round(config.engine.slowLane.minIntervalMs / 60000),
+        slowLaneJitterSeconds: Math.round(config.engine.slowLane.maxJitterMs / 1000),
+        batchPauseThreshold: config.engine.slowLane.batchPauseThreshold,
+        batchPauseMinutes: Math.round(config.engine.slowLane.batchPauseDurationMs / 60000),
+        fastLaneMinSeconds: Math.round(config.engine.fastLane.minDelayMs / 1000),
+        fastLaneMaxSeconds: Math.round(config.engine.fastLane.maxDelayMs / 1000)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
  * GET /api/v1/admin/tenants
  */
 router.get('/admin/tenants', requireAdmin, async (req, res) => {

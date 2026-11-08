@@ -3,48 +3,42 @@ const { Client, LocalAuth, MessageMedia } = pkg;
 import fs from 'fs';
 import path from 'path';
 import { EventEmitter } from 'events';
+import QRCode from 'qrcode';
 import { db } from '../database.js';
 import { config } from '../config.js';
 import { applySpintaxAndHashShield } from '../shield.js';
 
 const MODERN_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
 
-// Cache latest WhatsApp Web HTML version from wppconnect-team
-let cachedRemoteVersionUrl = null;
+// Stable remote WhatsApp Web HTML version (immediate fallback, no blocking GitHub API delay)
+const STABLE_REMOTE_WA_URL = 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1018940866-alpha.html';
+let cachedRemoteVersionUrl = STABLE_REMOTE_WA_URL;
 
-async function resolveLatestWaVersion() {
-  if (cachedRemoteVersionUrl) return cachedRemoteVersionUrl;
+// Asynchronously check for newer version in background without blocking startup
+(async () => {
   try {
-    const response = await fetch('https://api.github.com/repos/wppconnect-team/wa-version/contents/html', {
+    const res = await fetch('https://api.github.com/repos/wppconnect-team/wa-version/contents/html', {
       headers: { 'User-Agent': 'NodeJS-WA-Gateway' },
-      signal: AbortSignal.timeout(6000)
+      signal: AbortSignal.timeout(3000)
     });
-    if (response.ok) {
-      const files = await response.json();
+    if (res.ok) {
+      const files = await res.json();
       if (Array.isArray(files) && files.length > 0) {
-        // Sort files to find the newest HTML version
         const htmlFiles = files
           .map(f => f.name)
           .filter(n => n.endsWith('.html'))
           .sort();
-        const latestFile = htmlFiles[htmlFiles.length - 1];
-        if (latestFile) {
-          cachedRemoteVersionUrl = `https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/${latestFile}`;
-          console.log(`[WhatsApp Engine] Resolved latest remote WhatsApp Web version: ${latestFile}`);
-          return cachedRemoteVersionUrl;
+        const latest = htmlFiles[htmlFiles.length - 1];
+        if (latest) {
+          cachedRemoteVersionUrl = `https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/${latest}`;
         }
       }
     }
-  } catch (err) {
-    console.warn('[WhatsApp Engine] Notice: Could not fetch GitHub wa-version repository (using remote fallback):', err.message);
+  } catch (e) {
+    // Keep stable version
   }
-  // Safe default fallback
-  return 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1018940866-alpha.html';
-}
+})();
 
-/**
- * Removes lingering Chromium lock files that cause "SingletonLock" and startup crashes
- */
 function cleanChromiumLocks(sessionDir) {
   if (!fs.existsSync(sessionDir)) return;
   const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'DevToolsActivePort'];
@@ -59,15 +53,10 @@ function cleanChromiumLocks(sessionDir) {
         } else if (lockFiles.includes(entry.name)) {
           try {
             fs.unlinkSync(fullPath);
-            console.log(`[WhatsApp Engine] Removed stale Chromium lock file: ${fullPath}`);
-          } catch (e) {
-            // Ignore if in use
-          }
+          } catch (e) {}
         }
       }
-    } catch (e) {
-      // Directory access issue
-    }
+    } catch (e) {}
   };
 
   walkAndClean(sessionDir);
@@ -93,10 +82,8 @@ export class WhatsAppAccountInstance extends EventEmitter {
     this.isInitializing = true;
     this.updateStatus('INITIALIZING');
 
-    // Clean any prior dangling locks
+    // Clean prior dangling locks
     cleanChromiumLocks(this.sessionPath);
-
-    const remoteWaPath = await resolveLatestWaVersion();
 
     const puppeteerArgs = [
       '--no-sandbox',
@@ -135,7 +122,7 @@ export class WhatsAppAccountInstance extends EventEmitter {
         }),
         webVersionCache: {
           type: 'remote',
-          remotePath: remoteWaPath
+          remotePath: cachedRemoteVersionUrl
         },
         puppeteer: puppeteerOptions
       });
@@ -144,7 +131,7 @@ export class WhatsAppAccountInstance extends EventEmitter {
       await this.client.initialize();
       this.isInitializing = false;
     } catch (error) {
-      console.error(`[Account ${this.accountIndex}] Initialization failure:`, error.message);
+      console.error(`[Account ${this.accountIndex}] Erreur d'initialisation:`, error.message);
       this.updateStatus('ERROR', { error_message: error.message });
       this.isInitializing = false;
       this.handleCrashRecovery(error);
@@ -153,17 +140,27 @@ export class WhatsAppAccountInstance extends EventEmitter {
 
   setupEventHandlers() {
     this.client.on('qr', async (qr) => {
-      // Generate inline data URL using standard QR matrix or Google Chart / simple SVG data url
-      // For immediate preview without external heavy canvas, we create an SVG Data URL or API string
-      const qrDataUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`;
-      this.qrCodeDataUrl = qrDataUrl;
-      this.updateStatus('SCAN_QR', { qr_code_data_url: qrDataUrl });
-      console.log(`[Account ${this.accountIndex}] QR Code generated! Ready to scan.`);
-      this.emit('qr', { accountIndex: this.accountIndex, qr, qrDataUrl });
+      try {
+        // Fast instant local QR Code generation (in-memory Base64, 0.005s)
+        const qrDataUrl = await QRCode.toDataURL(qr, {
+          width: 300,
+          margin: 2,
+          color: {
+            dark: '#0f172a',
+            light: '#ffffff'
+          }
+        });
+        this.qrCodeDataUrl = qrDataUrl;
+        this.updateStatus('SCAN_QR', { qr_code_data_url: qrDataUrl });
+        console.log(`[Account ${this.accountIndex}] QR Code généré instantanément! Prêt à scanner.`);
+        this.emit('qr', { accountIndex: this.accountIndex, qr, qrDataUrl });
+      } catch (err) {
+        console.error(`[Account ${this.accountIndex}] Erreur génération QR:`, err.message);
+      }
     });
 
     this.client.on('authenticated', () => {
-      console.log(`[Account ${this.accountIndex}] WhatsApp Session Authenticated.`);
+      console.log(`[Account ${this.accountIndex}] Session WhatsApp authentifiée avec succès.`);
       this.qrCodeDataUrl = null;
       this.updateStatus('AUTHENTICATED', { qr_code_data_url: null });
       this.restartAttempts = 0;
@@ -171,7 +168,7 @@ export class WhatsAppAccountInstance extends EventEmitter {
     });
 
     this.client.on('auth_failure', (msg) => {
-      console.error(`[Account ${this.accountIndex}] WhatsApp Auth Failure:`, msg);
+      console.error(`[Account ${this.accountIndex}] Échec d'authentification:`, msg);
       this.updateStatus('ERROR', { error_message: msg });
       this.emit('auth_failure', { accountIndex: this.accountIndex, msg });
     });
@@ -179,14 +176,14 @@ export class WhatsAppAccountInstance extends EventEmitter {
     this.client.on('ready', async () => {
       try {
         const info = this.client.info;
-        this.phoneNumber = info?.wid?.user || 'Unknown';
-        console.log(`[Account ${this.accountIndex}] WhatsApp Line READY. Phone: ${this.phoneNumber}`);
+        this.phoneNumber = info?.wid?.user || 'Connecté';
+        console.log(`[Account ${this.accountIndex}] Ligne WhatsApp PRÊTE (READY). Numéro: ${this.phoneNumber}`);
         this.updateStatus('READY', {
           phone_number: this.phoneNumber,
           qr_code_data_url: null
         });
 
-        // Stealth injection into active browser page
+        // Stealth mode
         if (this.client.pupPage) {
           await this.client.pupPage.evaluateOnNewDocument(() => {
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -195,15 +192,15 @@ export class WhatsAppAccountInstance extends EventEmitter {
 
         this.emit('ready', { accountIndex: this.accountIndex, phoneNumber: this.phoneNumber });
       } catch (err) {
-        console.error(`[Account ${this.accountIndex}] Ready handler error:`, err.message);
+        console.error(`[Account ${this.accountIndex}] Erreur ready handler:`, err.message);
       }
     });
 
     this.client.on('disconnected', async (reason) => {
-      console.warn(`[Account ${this.accountIndex}] Disconnected: ${reason}`);
+      console.warn(`[Account ${this.accountIndex}] Ligne déconnectée: ${reason}`);
       this.updateStatus('DISCONNECTED', { qr_code_data_url: null });
       this.emit('disconnected', { accountIndex: this.accountIndex, reason });
-      this.handleCrashRecovery(new Error(`Disconnected: ${reason}`));
+      this.handleCrashRecovery(new Error(`Déconnecté: ${reason}`));
     });
   }
 
@@ -212,7 +209,7 @@ export class WhatsAppAccountInstance extends EventEmitter {
     try {
       await db.updateAccountStatus(this.accountIndex, status, extra);
     } catch (e) {
-      console.error(`[Account ${this.accountIndex}] Could not update status in DB:`, e.message);
+      console.error(`[Account ${this.accountIndex}] Mise à jour statut DB échouée:`, e.message);
     }
   }
 
@@ -220,68 +217,54 @@ export class WhatsAppAccountInstance extends EventEmitter {
     return this.status === 'READY' && this.client !== null;
   }
 
-  /**
-   * Auto-Recovery upon Chromium target crashes or execution context destruction
-   */
   async handleCrashRecovery(error) {
     const errorStr = (error && error.message) ? error.message : String(error);
     const isTargetCrash = errorStr.includes('Execution context was destroyed') ||
                           errorStr.includes('Target closed') ||
                           errorStr.includes('Session closed') ||
-                          errorStr.includes('Disconnected');
+                          errorStr.includes('Déconnecté');
 
     if (!isTargetCrash && this.restartAttempts >= this.maxRestartAttempts) {
-      console.error(`[Account ${this.accountIndex}] Max restart attempts reached. Manual reset needed.`);
+      console.error(`[Account ${this.accountIndex}] Nombre maximum de tentatives de redémarrage atteint.`);
       return;
     }
 
     this.restartAttempts++;
-    console.warn(`[Account ${this.accountIndex}] Triggering Auto-Recovery (attempt ${this.restartAttempts}/${this.maxRestartAttempts})...`);
+    console.warn(`[Account ${this.accountIndex}] Déclenchement récupération automatique (tentative ${this.restartAttempts}/${this.maxRestartAttempts})...`);
 
     try {
       if (this.client) {
         await this.client.destroy().catch(() => {});
         this.client = null;
       }
-    } catch (e) {
-      // Ignore
-    }
+    } catch (e) {}
 
     cleanChromiumLocks(this.sessionPath);
 
-    // Exponential backoff wait before restart
-    const backoffMs = Math.min(30000, 3000 * Math.pow(1.5, this.restartAttempts));
+    const backoffMs = Math.min(20000, 2000 * Math.pow(1.5, this.restartAttempts));
     await new Promise(r => setTimeout(r, backoffMs));
 
     await this.initialize();
   }
 
-  /**
-   * Sends a message with Human Presence Simulation & Anti-Ban Protection
-   */
   async sendMessage({ to, text, pdfBase64 = null, pdfFileName = null, kind = 'receipt' }) {
     if (!this.isReady()) {
-      throw new Error(`Account SIM ${this.accountIndex} is not ready (Status: ${this.status})`);
+      throw new Error(`La ligne SIM ${this.accountIndex} n'est pas prête (Statut: ${this.status})`);
     }
 
-    // Format destination WhatsApp JID (E.164 without +, e.g. 50931234567@c.us)
     const cleanNumber = to.replace(/\D/g, '');
     const chatId = `${cleanNumber}@c.us`;
 
-    // 1. HUMAN PRESENCE SIMULATION:
-    // Siyal sendPresenceAvailable()
+    // 1. Présence humaine
     try {
       await this.client.sendPresenceAvailable();
-    } catch (e) {
-      // Non-blocking
-    }
+    } catch (e) {}
 
-    // Shield payload calculation
     const isReminder = ['reminder', 'marketing'].includes(kind);
     const shieldResult = applySpintaxAndHashShield(text, { forceEngagement: isReminder });
     const finalMessageText = shieldResult.processedText;
 
-    // 2. Human typing simulation (2 to 4 seconds)
+    // 2. Simulation de frappe (typing)
     try {
       const chat = await this.client.getChatById(chatId);
       if (chat) {
@@ -290,24 +273,23 @@ export class WhatsAppAccountInstance extends EventEmitter {
         await chat.clearState();
       }
     } catch (err) {
-      // Fallback typing delay if chat object resolution fails
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
-    // 3. Dispatch: PDF Media or Text
+    // 3. Envoi PDF ou texte
     let sentResult = null;
     if (pdfBase64) {
       const media = new MessageMedia(
         'application/pdf',
         pdfBase64,
-        pdfFileName || 'Document.pdf'
+        pdfFileName || 'Facture.pdf'
       );
       sentResult = await this.client.sendMessage(chatId, media, { caption: finalMessageText });
     } else {
       sentResult = await this.client.sendMessage(chatId, finalMessageText);
     }
 
-    // 4. Update usage stats
+    // 4. Mise à jour compteurs
     await db.incrementAccountSent(this.accountIndex, isReminder);
 
     return {
@@ -322,29 +304,22 @@ export class WhatsAppAccountInstance extends EventEmitter {
     };
   }
 
-  /**
-   * Reset session: Wipes auth files to allow fresh QR scan
-   */
   async resetSession() {
-    console.log(`[Account ${this.accountIndex}] Resetting session completely...`);
+    console.log(`[Account ${this.accountIndex}] Réinitialisation complète de la session...`);
     try {
       if (this.client) {
         await this.client.logout().catch(() => {});
         await this.client.destroy().catch(() => {});
         this.client = null;
       }
-    } catch (e) {
-      // Ignore
-    }
+    } catch (e) {}
 
-    // Wipe session storage directory
     try {
       if (fs.existsSync(this.sessionPath)) {
         fs.rmSync(this.sessionPath, { recursive: true, force: true });
-        console.log(`[Account ${this.accountIndex}] Removed session folder: ${this.sessionPath}`);
       }
     } catch (err) {
-      console.warn(`[Account ${this.accountIndex}] Session folder removal warning:`, err.message);
+      console.warn(`[Account ${this.accountIndex}] Avertissement suppression dossier session:`, err.message);
     }
 
     this.qrCodeDataUrl = null;
@@ -354,7 +329,6 @@ export class WhatsAppAccountInstance extends EventEmitter {
       qr_code_data_url: null
     });
 
-    // Re-initialize immediately for new QR
     await this.initialize();
   }
 }

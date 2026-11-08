@@ -1,7 +1,6 @@
 /**
- * CVISUAL WHATSAPP GATEWAY - MAIN APP CONTROLLER
- * Zero Emojis. Exclusively Lucide Icons.
- * Production Ready - No Demo Mode.
+ * CVISUAL AUTOMATISATION - CONTRÔLEUR PRINCIPAL DE L'APPLICATION
+ * Entièrement en Français. Aucune émoticône (Lucide Icons uniquement).
  */
 
 // Supabase & Application State
@@ -10,14 +9,14 @@ let currentUser = null;
 let currentTenant = null;
 let isUserAdmin = false;
 
-// Initialize Lucide Icons
+// Initialisation des icônes Lucide
 function refreshLucideIcons() {
   if (window.lucide) {
     window.lucide.createIcons();
   }
 }
 
-// Config check and Supabase initialization
+// Vérification de la configuration Supabase
 function initSupabase() {
   const sbUrl = window.__ENV_SUPABASE_URL || localStorage.getItem('cv_supabase_url') || '';
   const sbKey = window.__ENV_SUPABASE_KEY || localStorage.getItem('cv_supabase_key') || '';
@@ -25,9 +24,8 @@ function initSupabase() {
   if (sbUrl && sbKey && window.supabase) {
     try {
       supabaseClient = window.supabase.createClient(sbUrl, sbKey);
-      console.log('[Supabase] Initialized client.');
+      console.log('[Supabase] Client initialisé.');
       
-      // Listen to auth changes
       supabaseClient.auth.onAuthStateChange(async (event, session) => {
         if (session && session.user) {
           await handleUserAuthenticated(session.user);
@@ -36,11 +34,11 @@ function initSupabase() {
         }
       });
     } catch (e) {
-      console.warn('[Supabase] Init error:', e.message);
+      console.warn('[Supabase] Erreur initialisation:', e.message);
     }
   }
 
-  // Check saved session in local storage
+  // Vérifier la session locale sauvegardée
   const savedUser = localStorage.getItem('cv_user_session');
   if (savedUser) {
     try {
@@ -52,7 +50,7 @@ function initSupabase() {
   }
 }
 
-// Navigation & View Switching
+// Navigation & Changement de vue SPA
 function switchView(viewName) {
   const landingSection = document.getElementById('view-landing');
   const clientDashboard = document.getElementById('view-client-dashboard');
@@ -77,7 +75,7 @@ function switchView(viewName) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-// Update Nav buttons depending on Auth state
+// Mise à jour de la barre de navigation
 function updateNavState() {
   const guestActions = document.getElementById('nav-guest-actions');
   const userActions = document.getElementById('nav-user-actions');
@@ -105,20 +103,19 @@ function updateNavState() {
   }
 }
 
-// Handle User Authentication
+// Authentification de l'utilisateur
 async function handleUserAuthenticated(user) {
   currentUser = user;
   localStorage.setItem('cv_user_session', JSON.stringify(user));
   
   try {
-    // Sync user with backend
     const res = await fetch('/api/v1/auth/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         userId: user.id || null,
         email: user.email,
-        companyName: user.user_metadata?.company_name || 'Antrepriz Kliyan'
+        companyName: user.user_metadata?.company_name || 'Entreprise'
       })
     });
 
@@ -128,9 +125,8 @@ async function handleUserAuthenticated(user) {
       currentTenant = data.tenant;
       localStorage.setItem('cv_tenant_data', JSON.stringify(data.tenant));
 
-      // Auto-Route to Admin if Admin Email matches
       if (isUserAdmin) {
-        console.log('[Auth] Admin email detected (laurorejeanclarens0@gmail.com). Routing to Admin Center.');
+        console.log('[Auth] Compte Administrateur détecté (laurorejeanclarens0@gmail.com). Redirection vers le Centre Admin.');
         switchView('admin');
       } else {
         switchView('client');
@@ -154,7 +150,7 @@ function handleUserLoggedOut() {
   switchView('landing');
 }
 
-// Modal Controllers
+// Gestionnaires de Modales
 function openModal(modalId, defaultTab = 'login') {
   const modal = document.getElementById(modalId);
   if (modal) {
@@ -191,7 +187,7 @@ function closeModal(modalId) {
   if (modal) modal.classList.remove('active');
 }
 
-// Interactive Shield Simulator on Landing Page
+// Simulateur de bouclier anti-ban en temps réel
 async function runShieldSimulator() {
   const inputEl = document.getElementById('sim-input-text');
   const kindEl = document.getElementById('sim-kind-select');
@@ -201,7 +197,7 @@ async function runShieldSimulator() {
   if (!text) return;
 
   btn.disabled = true;
-  btn.innerHTML = `<i data-lucide="loader-2" class="spin"></i> Ap trete boukliye...`;
+  btn.innerHTML = `<i data-lucide="loader-2" class="spin"></i> Traitement du bouclier...`;
   refreshLucideIcons();
 
   try {
@@ -216,25 +212,24 @@ async function runShieldSimulator() {
       document.getElementById('sim-output-text').textContent = data.preview.shielded_text;
       document.getElementById('sim-orig-hash').textContent = data.preview.original_sha256;
       document.getElementById('sim-shield-hash').textContent = data.preview.shielded_sha256;
-      document.getElementById('sim-unicode-count').textContent = data.preview.invisible_unicode_count;
-      document.getElementById('sim-typing-ms').textContent = `${(data.preview.typing_simulation_ms / 1000).toFixed(1)}s`;
+      document.getElementById('sim-unicode-count').textContent = `${data.preview.invisible_unicode_count} caractères invisibles`;
+      document.getElementById('sim-typing-ms').textContent = `${(data.preview.typing_simulation_ms / 1000).toFixed(1)}s de frappe humaine`;
       document.getElementById('sim-results-card').style.display = 'block';
     }
   } catch (err) {
-    alert('Erè pandan simulation: ' + err.message);
+    alert('Erreur lors de la simulation: ' + err.message);
   } finally {
     btn.disabled = false;
-    btn.innerHTML = `<i data-lucide="play"></i> Teste Boukliye a Kounye a`;
+    btn.innerHTML = `<i data-lucide="play"></i> Tester le Bouclier Maintenant`;
     refreshLucideIcons();
   }
 }
 
-// DOM Content Loaded Handler
+// Initialisation globale
 document.addEventListener('DOMContentLoaded', () => {
   initSupabase();
   refreshLucideIcons();
 
-  // Wire Auth Modal tabs
   const tabLogin = document.getElementById('tab-btn-login');
   const tabRegister = document.getElementById('tab-btn-register');
   const formLogin = document.getElementById('form-login');
@@ -254,13 +249,12 @@ document.addEventListener('DOMContentLoaded', () => {
       tabRegister.classList.add('active');
       tabLogin.classList.remove('active');
       tabRegister.style.borderBottom = '2px solid var(--accent-primary)';
-      tabLogin.style.borderBottom = 'none';
+      tabRegister.style.borderBottom = 'none';
       formRegister.style.display = 'block';
       formLogin.style.display = 'none';
     });
   }
 
-  // Handle Login submission
   if (formLogin) {
     formLogin.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -270,7 +264,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (supabaseClient) {
         const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
         if (error) {
-          alert('Erè koneksyon Supabase: ' + error.message);
+          alert('Erreur de connexion Supabase: ' + error.message);
           return;
         }
         closeModal('modal-auth');
@@ -279,13 +273,12 @@ document.addEventListener('DOMContentLoaded', () => {
         await handleUserAuthenticated({
           id: 'user-' + Date.now(),
           email,
-          user_metadata: { company_name: 'Antrepriz Kliyan' }
+          user_metadata: { company_name: 'Entreprise' }
         });
       }
     });
   }
 
-  // Handle Registration submission
   if (formRegister) {
     formRegister.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -304,10 +297,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (error) {
-          alert('Erè enskripsyon Supabase: ' + error.message);
+          alert("Erreur d'inscription Supabase: " + error.message);
           return;
         }
-        alert('Kont ou kreye avèk siksè nan Supabase! Si w se admin w ap antre touswit, sinon admin nan ap valide plan w.');
+        alert('Compte créé avec succès ! Un administrateur validera votre demande de forfait.');
         closeModal('modal-auth');
       } else {
         closeModal('modal-auth');
@@ -320,13 +313,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Wire Simulator button
   const simBtn = document.getElementById('sim-run-btn');
   if (simBtn) {
     simBtn.addEventListener('click', runShieldSimulator);
   }
 
-  // Wire Logout button
   const logoutBtn = document.getElementById('btn-logout');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', async () => {

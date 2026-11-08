@@ -1,6 +1,6 @@
 /**
- * CVISUAL WHATSAPP GATEWAY - CLIENT DASHBOARD CONTROLLER
- * Exclusively Lucide icons. No emojis.
+ * CVISUAL AUTOMATISATION - CONTRÔLEUR TABLEAU DE BORD CLIENT
+ * Entièrement en Français. Aucune émoticône (Lucide Icons uniquement).
  */
 
 window.clientController = {
@@ -10,8 +10,8 @@ window.clientController = {
   async refreshDashboard() {
     if (!currentTenant) return;
 
-    // Populate user metrics & info
-    document.getElementById('client-company-title').textContent = currentTenant.name || 'Kont Kliyan';
+    // Métriques et informations utilisateur
+    document.getElementById('client-company-title').textContent = currentTenant.name || 'Compte Client';
     document.getElementById('client-plan-tier').textContent = (currentTenant.plan_tier || 'Starter').toUpperCase();
     
     const monthlyQuotaEl = document.getElementById('client-monthly-quota-display');
@@ -23,38 +23,38 @@ window.clientController = {
     if (dailyQuotaEl) {
       dailyQuotaEl.textContent = currentTenant.daily_quota || 15;
     }
-    
-    // Status Badge
+
+    // Badge de statut
     const statusBadge = document.getElementById('client-account-status');
     if (currentTenant.is_active) {
       statusBadge.className = 'badge badge-success';
-      statusBadge.innerHTML = `<i data-lucide="check-circle" class="icon-sm"></i> Aktif`;
+      statusBadge.innerHTML = `<i data-lucide="check-circle" class="icon-sm"></i> Actif`;
     } else {
       statusBadge.className = 'badge badge-warning';
-      statusBadge.innerHTML = `<i data-lucide="clock" class="icon-sm"></i> Ap Tann Validasyon Admin`;
+      statusBadge.innerHTML = `<i data-lucide="clock" class="icon-sm"></i> En attente de validation`;
     }
 
-    // API Key setup
+    // Clé API
     const apiKeyField = document.getElementById('client-api-key');
     if (apiKeyField) {
-      apiKeyField.value = currentTenant.api_key || 'cv_live_awaiting_approval';
+      apiKeyField.value = currentTenant.api_key || 'cv_live_en_attente_approbation';
     }
 
-    // Update code snippet preview
+    // Mise à jour de l'exemple cURL
     this.updateCodeSnippets(currentTenant.api_key);
 
-    // Fetch Outbox messages
+    // Récupération des messages
     await this.fetchMessages();
     refreshLucideIcons();
   },
 
-  updateCodeSnippets(apiKey = 'YOUR_API_KEY') {
-    const curlCode = `curl -X POST "http://localhost:3000/api/v1/messages/send" \\
+  updateCodeSnippets(apiKey = 'VOTRE_CLE_API') {
+    const curlCode = `curl -X POST "https://cvisual-whatsapp-gateway.onrender.com/api/v1/messages/send" \\
   -H "Authorization: Bearer ${apiKey}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "to": "50931234567",
-    "message": "{Bonjour|Salut} Cher client, fakti w disponib. Pou konfime, reponn OK.",
+    "message": "{Bonjour|Salut} Cher client, votre facture est disponible.",
     "kind": "receipt"
   }'`;
 
@@ -69,14 +69,14 @@ window.clientController = {
     try {
       await navigator.clipboard.writeText(currentTenant.api_key);
       const btn = document.getElementById('btn-copy-api-key');
-      btn.innerHTML = `<i data-lucide="check" class="icon-sm"></i> Kopye!`;
+      btn.innerHTML = `<i data-lucide="check" class="icon-sm"></i> Copié !`;
       refreshLucideIcons();
       setTimeout(() => {
-        btn.innerHTML = `<i data-lucide="copy" class="icon-sm"></i> Kopye Kle`;
+        btn.innerHTML = `<i data-lucide="copy" class="icon-sm"></i> Copier la Clé`;
         refreshLucideIcons();
       }, 2000);
     } catch (e) {
-      alert('Erè pandan kopi kle a');
+      alert('Erreur lors de la copie de la clé.');
     }
   },
 
@@ -85,14 +85,13 @@ window.clientController = {
     if (!file) return;
 
     if (file.type !== 'application/pdf') {
-      alert('Tanpri chwazi yon fichye PDF sèlman.');
+      alert('Veuillez sélectionner un fichier PDF uniquement.');
       event.target.value = '';
       return;
     }
 
     const reader = new FileReader();
     reader.onload = (e) => {
-      // Extract base64 without prefix data:application/pdf;base64,
       const fullBase64 = e.target.result;
       const base64Content = fullBase64.split(',')[1];
       this.activePdfBase64 = base64Content;
@@ -116,7 +115,7 @@ window.clientController = {
   async sendMessage(event) {
     event.preventDefault();
     if (!currentTenant || !currentTenant.api_key) {
-      alert('Ou pa gen yon kle API aktif.');
+      alert("Votre compte n'a pas de clé API active.");
       return;
     }
 
@@ -126,12 +125,12 @@ window.clientController = {
     const sendBtn = document.getElementById('btn-send-message');
 
     if (!to || !message) {
-      alert('Tanpri ranpli nimewo a ak mesaj la.');
+      alert('Veuillez renseigner le numéro et le texte du message.');
       return;
     }
 
     sendBtn.disabled = true;
-    sendBtn.innerHTML = `<i data-lucide="loader-2" class="spin icon-sm"></i> Ap voye nan gateway...`;
+    sendBtn.innerHTML = `<i data-lucide="loader-2" class="spin icon-sm"></i> Envoi vers la passerelle...`;
     refreshLucideIcons();
 
     try {
@@ -154,19 +153,18 @@ window.clientController = {
 
       const data = await res.json();
       if (res.ok && data.ok) {
-        alert(`Mesaj aksepte! ID: ${data.message_id}\nKanal: ${data.lane === 'fast_lane' ? 'Fast Lane (Tranzaksyonèl Rapid)' : 'Slow Lane (Anti-Bann Paced)'}`);
-        // Reset form
+        alert(`Message pris en charge avec succès !\nID: ${data.message_id}\nCanal: ${data.lane === 'fast_lane' ? 'Fast Lane (Instantané)' : 'Slow Lane (Anti-Ban Temporisé)'}`);
         document.getElementById('msg-text').value = '';
         this.removePdf();
         await this.fetchMessages();
       } else {
-        alert('Erè: ' + (data.error || 'Pa ka voye mesaj la'));
+        alert('Erreur: ' + (data.error || "Impossible d'envoyer le message."));
       }
     } catch (err) {
-      alert('Erè rezo: ' + err.message);
+      alert('Erreur réseau: ' + err.message);
     } finally {
       sendBtn.disabled = false;
-      sendBtn.innerHTML = `<i data-lucide="send" class="icon-sm"></i> Voye Mesaj la`;
+      sendBtn.innerHTML = `<i data-lucide="send" class="icon-sm"></i> Envoyer le Message`;
       refreshLucideIcons();
     }
   },
@@ -184,22 +182,22 @@ window.clientController = {
       if (!tbody) return;
 
       if (!data.messages || data.messages.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 30px;">Pa gen okenn mesaj nan file d'attente a pou kounye a.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 30px;">Aucun message dans votre boîte d'envoi pour le moment.</td></tr>`;
         return;
       }
 
       tbody.innerHTML = data.messages.map(msg => {
-        let statusBadge = '<span class="badge badge-muted">Pending</span>';
-        if (msg.status === 'sent') statusBadge = '<span class="badge badge-success"><i data-lucide="check" class="icon-sm"></i> Sent</span>';
-        else if (msg.status === 'processing') statusBadge = '<span class="badge badge-primary"><i data-lucide="loader-2" class="spin icon-sm"></i> Sending</span>';
-        else if (msg.status === 'failed') statusBadge = '<span class="badge badge-danger"><i data-lucide="alert-triangle" class="icon-sm"></i> Failed</span>';
+        let statusBadge = '<span class="badge badge-muted">En attente</span>';
+        if (msg.status === 'sent') statusBadge = '<span class="badge badge-success"><i data-lucide="check" class="icon-sm"></i> Envoyé</span>';
+        else if (msg.status === 'processing') statusBadge = '<span class="badge badge-primary"><i data-lucide="loader-2" class="spin icon-sm"></i> En cours</span>';
+        else if (msg.status === 'failed') statusBadge = '<span class="badge badge-danger"><i data-lucide="alert-triangle" class="icon-sm"></i> Échoué</span>';
 
         const isFast = ['receipt', 'welcome', 'otp', 'test'].includes(msg.kind);
         const laneBadge = isFast
           ? `<span class="badge badge-primary">Fast Lane</span>`
           : `<span class="badge badge-warning">Slow Lane</span>`;
 
-        const dateStr = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const dateStr = new Date(msg.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
         return `
           <tr>
@@ -207,7 +205,7 @@ window.clientController = {
             <td>${laneBadge}</td>
             <td><span class="badge badge-muted">${msg.kind}</span></td>
             <td>${statusBadge}</td>
-            <td>${msg.sent_by_phone ? msg.sent_by_phone : '<span style="color:var(--text-dim);">-</span>'}</td>
+            <td>${msg.sent_by_phone ? '+' + msg.sent_by_phone : '<span style="color:var(--text-dim);">-</span>'}</td>
             <td style="color: var(--text-muted); font-size: 0.8rem;">${dateStr}</td>
           </tr>
         `;
@@ -228,24 +226,23 @@ window.clientController = {
         body: JSON.stringify({
           userId: currentUser.id,
           email: currentUser.email,
-          companyName: currentTenant ? currentTenant.name : 'Kliyan',
+          companyName: currentTenant ? currentTenant.name : 'Client',
           requestedPlan
         })
       });
       const data = await res.json();
       if (data.ok) {
-        alert('Demann chanjman plan voye bay administratè a avèk siksè!');
+        alert('Votre demande de forfait a été transmise à l’administrateur.');
         closeModal('modal-upgrade-plan');
       } else {
-        alert('Erè: ' + data.error);
+        alert('Erreur: ' + data.error);
       }
     } catch (e) {
-      alert('Erè pandan voye demann: ' + e.message);
+      alert("Erreur lors de l'envoi de la demande: " + e.message);
     }
   }
 };
 
-// Wire event listeners on load
 document.addEventListener('DOMContentLoaded', () => {
   const formMsg = document.getElementById('form-client-send-msg');
   if (formMsg) {

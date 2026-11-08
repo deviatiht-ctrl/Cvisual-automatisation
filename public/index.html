@@ -1,16 +1,19 @@
 <!DOCTYPE html>
-<html lang="ht">
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CVISUAL | Standalone WhatsApp Gateway & Anti-Ban SaaS</title>
+  <title>CVISUAL AUTOMATISATION | Passerelle WhatsApp API & Bouclier Anti-Ban</title>
   
+  <!-- Favicon -->
+  <link rel="icon" type="image/jpeg" href="images/logo.jpeg">
+
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <!-- Lucide Icons (Strictly No Emojis) -->
+  <!-- Lucide Icons (Strictement Aucune Émoticône) -->
   <script src="https://unpkg.com/lucide@latest"></script>
 
   <!-- Supabase JS Client -->
@@ -20,82 +23,80 @@
     window.__ENV_SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im95a3VoaG9nY2RibW95YnNrZXhkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5MTk1OTksImV4cCI6MjA5NjQ5NTU5OX0.xbIdgA6-DCILYkDQcl_VzWgz7HmIlHYhmRp0u_a87F4";
   </script>
 
-  <!-- Main Stylesheet -->
+  <!-- Main Stylesheet (Thème Blanc & Épuré) -->
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-  <!-- ================= TOP NAVIGATION BAR ================= -->
+  <!-- ================= BARRE DE NAVIGATION ================= -->
   <header class="navbar">
     <div class="container nav-container">
       <a href="#" class="brand-logo" onclick="switchView('landing'); return false;">
-        <div class="brand-icon">
-          <i data-lucide="shield-check" class="icon-md"></i>
-        </div>
-        <span>CVISUAL <span style="color: var(--accent-secondary); font-weight: 500;">GATEWAY</span></span>
+        <img src="images/logo.jpeg" alt="Logo CVISUAL AUTOMATISATION" class="brand-logo-img">
+        <span>CVISUAL <span style="color: var(--accent-primary); font-weight: 600;">AUTOMATISATION</span></span>
       </a>
 
       <ul class="nav-links">
-        <li><a href="#features" class="nav-link" onclick="switchView('landing');"><i data-lucide="cpu" class="icon-sm"></i> Karakteristik</a></li>
-        <li><a href="#shield" class="nav-link" onclick="switchView('landing');"><i data-lucide="shield" class="icon-sm"></i> Boukliye Anti-Bann</a></li>
-        <li><a href="#plans" class="nav-link" onclick="switchView('landing');"><i data-lucide="layers" class="icon-sm"></i> Plan yo</a></li>
-        <li><a href="#api-docs" class="nav-link" onclick="switchView('landing');"><i data-lucide="terminal" class="icon-sm"></i> REST API</a></li>
+        <li><a href="#features" class="nav-link" onclick="switchView('landing');"><i data-lucide="cpu" class="icon-sm"></i> Caractéristiques</a></li>
+        <li><a href="#shield" class="nav-link" onclick="switchView('landing');"><i data-lucide="shield" class="icon-sm"></i> Bouclier Anti-Ban</a></li>
+        <li><a href="#plans" class="nav-link" onclick="switchView('landing');"><i data-lucide="layers" class="icon-sm"></i> Forfaits</a></li>
+        <li><a href="#api-docs" class="nav-link" onclick="switchView('landing');"><i data-lucide="terminal" class="icon-sm"></i> API REST</a></li>
       </ul>
 
-      <!-- Guest Actions -->
+      <!-- Actions Visiteur -->
       <div id="nav-guest-actions" class="nav-actions">
-        <button class="btn btn-secondary btn-sm" onclick="openModal('modal-auth');">
-          <i data-lucide="log-in" class="icon-sm"></i> Konekte
+        <button class="btn btn-secondary btn-sm" onclick="openModal('modal-auth', 'login');">
+          <i data-lucide="log-in" class="icon-sm"></i> Se Connecter
         </button>
         <button class="btn btn-primary btn-sm" onclick="openModal('modal-auth', 'register');">
-          <i data-lucide="user-plus" class="icon-sm"></i> Kreye Kont
+          <i data-lucide="user-plus" class="icon-sm"></i> Créer un Compte
         </button>
       </div>
 
-      <!-- Authenticated User Actions -->
+      <!-- Actions Utilisateur Connecté -->
       <div id="nav-user-actions" class="nav-actions" style="display: none;">
         <span id="nav-admin-badge" class="badge badge-warning" style="display: none;">
-          <i data-lucide="shield-alert" class="icon-sm"></i> ADMIN MASTER
+          <i data-lucide="shield-alert" class="icon-sm"></i> ADMIN
         </span>
         <button id="nav-admin-switch-btn" class="btn btn-sm btn-secondary" style="display: none;" onclick="switchView('admin');">
-          <i data-lucide="sliders" class="icon-sm"></i> Panèl Admin
+          <i data-lucide="sliders" class="icon-sm"></i> Centre Admin
         </button>
         <button id="nav-client-switch-btn" class="btn btn-sm btn-secondary" onclick="switchView('client');">
-          <i data-lucide="layout-dashboard" class="icon-sm"></i> Dashboard
+          <i data-lucide="layout-dashboard" class="icon-sm"></i> Tableau de Bord
         </button>
         <span id="nav-user-email" style="font-size: 0.85rem; color: var(--text-muted); font-weight: 600;"></span>
         <button id="btn-logout" class="btn btn-sm btn-danger">
-          <i data-lucide="log-out" class="icon-sm"></i> Sòti
+          <i data-lucide="log-out" class="icon-sm"></i> Déconnexion
         </button>
       </div>
     </div>
   </header>
 
-  <!-- ================= VIEW 1: PUBLIC LANDING PAGE ================= -->
+  <!-- ================= VUE 1: PAGE D'ACCUEIL (LANDING) ================= -->
   <main id="view-landing">
     <!-- Hero Section -->
     <section class="hero">
       <div class="container">
         <div class="hero-pill">
           <i data-lucide="zap" class="icon-sm"></i>
-          <span>Otomazasyon WhatsApp Multi-Tenant & Anti-Bann Meta</span>
+          <span>Automatisation WhatsApp Multi-Tenant & Bouclier Anti-Ban Meta</span>
         </div>
         
         <h1 class="hero-title">
-          Voye Dè Milye Mesaj WhatsApp <br>
-          <span class="text-gradient">San Risk Pou Nimewo w Bloke</span>
+          Envoyez des Milliers de Messages WhatsApp <br>
+          <span class="text-gradient">Sans Risque de Blocage</span>
         </h1>
 
         <p class="hero-subtitle">
-          Gateway REST API pwofesyonèl pou Gym, Klinik, Lekòl, ak E-commerce. Distribisyon Doub Vitès (Fast Lane & Slow Lane), Spintax dinamik, ak Anprent Envizib Unicode SHA-256.
+          Passerelle API REST professionnelle pour Entreprises, Cliniques, Écoles, Salles de Sport et E-commerce. Distribution double vitesse (Fast Lane & Slow Lane), Spintax dynamique et empreinte invisible Unicode SHA-256.
         </p>
 
         <div class="hero-cta">
           <button class="btn btn-primary btn-lg" onclick="openModal('modal-auth', 'register');">
-            <i data-lucide="rocket" class="icon-md"></i> Kòmanse Kounye a
+            <i data-lucide="rocket" class="icon-md"></i> Démarrer Maintenant
           </button>
           <button class="btn btn-secondary btn-lg" onclick="openModal('modal-auth', 'login');">
-            <i data-lucide="log-in" class="icon-md"></i> Konekte nan Kont Ou
+            <i data-lucide="log-in" class="icon-md"></i> Accéder à Mon Espace
           </button>
         </div>
 
@@ -106,7 +107,7 @@
             </div>
             <div>
               <div class="hero-stat-val">99.9%</div>
-              <div class="hero-stat-label">Taux Delivrans Mesaj</div>
+              <div class="hero-stat-label">Taux de Délivrabilité</div>
             </div>
           </div>
           <div class="hero-stat-card">
@@ -114,8 +115,8 @@
               <i data-lucide="shield-check" class="icon-md"></i>
             </div>
             <div>
-              <div class="hero-stat-val">Zero-Ban</div>
-              <div class="hero-stat-label">Pwoteksyon Polymorphic</div>
+              <div class="hero-stat-val">Zéro-Ban</div>
+              <div class="hero-stat-label">Défense Polymorphique</div>
             </div>
           </div>
           <div class="hero-stat-card">
@@ -124,7 +125,7 @@
             </div>
             <div>
               <div class="hero-stat-val">&lt; 3s</div>
-              <div class="hero-stat-label">Vitès Fast Lane</div>
+              <div class="hero-stat-label">Vitesse Fast Lane</div>
             </div>
           </div>
           <div class="hero-stat-card">
@@ -133,66 +134,66 @@
             </div>
             <div>
               <div class="hero-stat-val">Cluster Multi-SIM</div>
-              <div class="hero-stat-label">Distribisyon LRU Otomatik</div>
+              <div class="hero-stat-label">Distribution LRU Intelligente</div>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Interactive Anti-Ban Shield Simulator -->
+    <!-- Simulateur de Bouclier Anti-Ban -->
     <section id="shield" class="section">
       <div class="container">
         <div class="section-header">
-          <span class="section-tag">Sekirite Avanse</span>
-          <h2 class="section-title">Boukliye Anti-Spam & Anti-Bann Meta</h2>
+          <span class="section-tag">Sécurité Avancée</span>
+          <h2 class="section-title">Bouclier Anti-Spam & Anti-Ban Meta</h2>
           <p class="section-desc">
-            Algoritm Meta yo analize repetisyon tèks. Gade kijan sistèm nou an transfòme menm mesaj la an yon kopi inik ak anprent kriptografik diferan.
+            Les algorithmes de Meta surveillent les messages identiques répétitifs. Testez comment notre passerelle génère une empreinte SHA-256 unique pour chaque envoi.
           </p>
         </div>
 
         <div class="simulator-box">
           <div class="sim-grid">
-            <!-- Simulator Input -->
+            <!-- Entrée Simulateur -->
             <div class="sim-field">
-              <label for="sim-input-text">Tèks Mesaj w ap Prepare a (Avèk Spintax):</label>
-              <textarea id="sim-input-text" rows="5">{Bonjour|Salut|Bonsoir} Cher(e) {kliyan|patnè}! Nou konfime resepsyon peman w lan. Ne répondez pas.</textarea>
+              <label for="sim-input-text">Texte du Message à Préparer (avec Spintax) :</label>
+              <textarea id="sim-input-text" rows="5">{Bonjour|Salut|Bonsoir} Cher(e) {client|partenaire} ! Votre facture mensuelle est prête. Ne répondez pas.</textarea>
               
               <div style="margin-top: 14px; display: flex; gap: 12px; align-items: center;">
                 <div style="flex: 1;">
-                  <label for="sim-kind-select" style="margin-bottom: 4px;">Tip Mesaj:</label>
+                  <label for="sim-kind-select" style="margin-bottom: 4px;">Type de Message :</label>
                   <select id="sim-kind-select">
-                    <option value="reminder">Rapèl / Relans (Slow Lane + OK Engagement)</option>
-                    <option value="receipt">Fakti / Resi (Fast Lane Tranzaksyonèl)</option>
-                    <option value="welcome">Byenvini (Fast Lane)</option>
+                    <option value="reminder">Relance / Facture (Slow Lane + Engagement "OK")</option>
+                    <option value="receipt">Reçu Transactionnel (Fast Lane Immédiat)</option>
+                    <option value="welcome">Message de Bienvenue (Fast Lane Immédiat)</option>
                   </select>
                 </div>
                 <button id="sim-run-btn" class="btn btn-primary" style="margin-top: 22px;">
-                  <i data-lucide="play" class="icon-sm"></i> Teste Boukliye a Kounye a
+                  <i data-lucide="play" class="icon-sm"></i> Tester le Bouclier Maintenant
                 </button>
               </div>
             </div>
 
-            <!-- Simulator Output -->
-            <div id="sim-results-card" class="sim-field" style="background: rgba(0,0,0,0.3); padding: 18px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
-              <label>Rezilta ki pral soti sou WhatsApp Kliyan an:</label>
-              <div id="sim-output-text" style="background: var(--bg-primary); padding: 12px; border-radius: var(--radius-sm); font-size: 0.9rem; min-height: 80px; white-space: pre-wrap; color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.2);">
-                {Bonjour|Salut} Cher(e) kliyan! Nou konfime resepsyon peman w lan.
+            <!-- Sortie Simulateur -->
+            <div id="sim-results-card" class="sim-field" style="background: #ffffff; padding: 18px; border-radius: var(--radius-md); border: 1px solid var(--border-color); box-shadow: var(--shadow-sm);">
+              <label>Résultat délivré sur le WhatsApp du Destinataire :</label>
+              <div id="sim-output-text" style="background: var(--bg-secondary); padding: 12px; border-radius: var(--radius-sm); font-size: 0.9rem; min-height: 80px; white-space: pre-wrap; color: var(--text-main); border: 1px solid var(--border-color);">
+                Bonjour Cher client ! Votre facture mensuelle est prête.
               </div>
 
               <div style="margin-top: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                 <div>
-                  <span style="font-size: 0.75rem; color: var(--text-muted);">Espas Envizib Enjekte:</span>
-                  <div id="sim-unicode-count" style="font-weight: 700; color: #38bdf8;">14 karaktè envizib</div>
+                  <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">Caractères Invisibles Injectés :</span>
+                  <div id="sim-unicode-count" style="font-weight: 700; color: #0284c7;">14 caractères invisibles</div>
                 </div>
                 <div>
-                  <span style="font-size: 0.75rem; color: var(--text-muted);">Similasyon Frape Imèn:</span>
-                  <div id="sim-typing-ms" style="font-weight: 700; color: #fbbf24;">3.2s typing</div>
+                  <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">Simulation de Frappe Humaine :</span>
+                  <div id="sim-typing-ms" style="font-weight: 700; color: #d97706;">3.2s de frappe</div>
                 </div>
               </div>
 
               <div style="margin-top: 10px;">
-                <span style="font-size: 0.72rem; color: var(--text-muted);">Nouvo SHA-256 Polymorphic Fingerprint:</span>
+                <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: 600;">Empreinte Cryptographique Polymorphique SHA-256 :</span>
                 <div id="sim-shield-hash" class="hash-display">6a82fb831e5f8842...</div>
               </div>
             </div>
@@ -201,14 +202,14 @@
       </div>
     </section>
 
-    <!-- Dual Lane Architecture Showcase -->
+    <!-- Architecture Double Vitesse -->
     <section id="features" class="section">
       <div class="container">
         <div class="section-header">
-          <span class="section-tag">Achitekti Doub Vitès</span>
-          <h2 class="section-title">2 Kanal Distribisyon Separe Nèt</h2>
+          <span class="section-tag">Architecture Double Vitesse</span>
+          <h2 class="section-title">2 Canaux de Distribution Entièrement Séparés</h2>
           <p class="section-desc">
-            Nou pa janm melanje resi ijan ak kanpay rapèl masif. Sa garanti vitès imedyat pou tranzaksyon ak pwoteksyon total pou liy yo.
+            Ne mélangez plus les reçus urgents et les relances massives. Cette séparation garantit une délivrance instantanée pour les opérations critiques et protège vos numéros.
           </p>
         </div>
 
@@ -216,24 +217,24 @@
           <!-- Fast Lane -->
           <div class="card lane-card fast-lane">
             <div class="card-title">
-              <i data-lucide="zap" style="color: #10b981;"></i>
-              <span>Liy Rapid Tranzaksyonèl (Fast Lane)</span>
+              <i data-lucide="zap" style="color: var(--accent-success);"></i>
+              <span>Ligne Rapide Transactionnelle (Fast Lane)</span>
             </div>
             <p style="color: var(--text-muted); font-size: 0.9rem;">
-              Rezève pou mesaj kliyan ap tann touswit: fakti PDF, kòd OTP, konfimasyon enskripsyon, ak resi peman.
+              Dédiée aux messages attendus immédiatement par le client : factures PDF, codes OTP, confirmations d'inscriptions et reçus de paiement.
             </p>
             <ul class="lane-feature-list">
               <li class="lane-feature-item">
                 <i data-lucide="check" class="icon-sm"></i>
-                <span><strong>Okenn plafon 25/jou pa aplike:</strong> Kapab voye 200 jiska 500+ mesaj san pwoblèm.</span>
+                <span><strong>Aucune limitation de quota quotidien :</strong> Envoi de 200 à 500+ messages/jour sans contrainte.</span>
               </li>
               <li class="lane-feature-item">
                 <i data-lucide="check" class="icon-sm"></i>
-                <span><strong>Delè Ultra Rapid:</strong> Soti nan 3 a 10 segonn avèk similasyon moun k ap tape (2 a 4s).</span>
+                <span><strong>Délai Ultra-Rapide :</strong> Expédition en 3 à 10 secondes avec simulation de présence humaine (typing).</span>
               </li>
               <li class="lane-feature-item">
                 <i data-lucide="check" class="icon-sm"></i>
-                <span><strong>Priyorite Outbox:</strong> Li pase devan tout rapèl ki te nan file d'attente a.</span>
+                <span><strong>Priorité Absolue :</strong> Dépasse instantanément toutes les relances en attente dans la file.</span>
               </li>
             </ul>
           </div>
@@ -241,24 +242,24 @@
           <!-- Slow Lane -->
           <div class="card lane-card slow-lane">
             <div class="card-title">
-              <i data-lucide="clock" style="color: #f59e0b;"></i>
-              <span>Liy Dousman pou Rapèl (Slow Lane)</span>
+              <i data-lucide="clock" style="color: var(--accent-warning);"></i>
+              <span>Ligne Temporisée pour Relances (Slow Lane)</span>
             </div>
             <p style="color: var(--text-muted); font-size: 0.9rem;">
-              Rezève pou rapèl bòdwo, relans abònman ekspire, ak mesaj maketing san pèdi nimewo w.
+              Dédiée aux relances d'impayés, renouvellements d'abonnements et campagnes marketing avec protection anti-ban maximale.
             </p>
             <ul class="lane-feature-list">
               <li class="lane-feature-item">
-                <i data-lucide="shield-alert" class="icon-sm" style="color: #f59e0b;"></i>
-                <span><strong>Delè Pacing 10 a 16 Minit:</strong> 600,000ms + jitter varyab ant chak grenn mesaj.</span>
+                <i data-lucide="shield-alert" class="icon-sm" style="color: var(--accent-warning);"></i>
+                <span><strong>Pacing Intelligent & Temporisé :</strong> Délais et variations aléatoires ajustables depuis le panneau admin.</span>
               </li>
               <li class="lane-feature-item">
-                <i data-lucide="shield-alert" class="icon-sm" style="color: #f59e0b;"></i>
-                <span><strong>Plafon Strik 25 Rapèl / SIM / Jou:</strong> Dèske liy lan rive nan limit la, li fèmen pou rapèl men l rete ouvri pou resi!</span>
+                <i data-lucide="shield-alert" class="icon-sm" style="color: var(--accent-warning);"></i>
+                <span><strong>Pauses de Repos Automatiques :</strong> Pause programmée après chaque lot d'envois consécutifs.</span>
               </li>
               <li class="lane-feature-item">
-                <i data-lucide="shield-alert" class="icon-sm" style="color: #f59e0b;"></i>
-                <span><strong>Poz Repo (Batch Pause):</strong> Poz 10 minit siplemantè apre chak 5 rapèl sou menm liy lan.</span>
+                <i data-lucide="shield-alert" class="icon-sm" style="color: var(--accent-warning);"></i>
+                <span><strong>Rotation LRU (Least Recently Used) :</strong> Distribution intelligente sur l'ensemble des SIM disponibles du cluster.</span>
               </li>
             </ul>
           </div>
@@ -266,14 +267,14 @@
       </div>
     </section>
 
-    <!-- Pricing / Plans Section -->
+    <!-- Forfaits & Tarifs -->
     <section id="plans" class="section">
       <div class="container">
         <div class="section-header">
-          <span class="section-tag">Pri & Abònman</span>
-          <h2 class="section-title">Chwazi Plan ki Koresponn ak Volim Ou</h2>
+          <span class="section-tag">Tarifs & Forfaits</span>
+          <h2 class="section-title">Choisissez le Forfait Adapté à Votre Activité</h2>
           <p class="section-desc">
-            Chak plan gen aksè a kle API REST sekirize ak boukliye anti-bann nou an.
+            Chaque forfait comprend un accès API REST sécurisé, le bouclier anti-ban et le tableau de bord en direct.
           </p>
         </div>
 
@@ -281,40 +282,40 @@
           <!-- Starter Plan -->
           <div class="card pricing-card">
             <div>
-              <div class="plan-name">Starter Debitan</div>
-              <p style="color: var(--text-muted); font-size: 0.85rem;">Ideyal pou ti biznis, jimnas oswa klinik k ap kòmanse.</p>
-              <div class="plan-price">$25 <span class="plan-period">/ mwa</span></div>
+              <div class="plan-name">Starter Débutant</div>
+              <p style="color: var(--text-muted); font-size: 0.85rem;">Idéal pour les commerces, cabinets ou petites salles de sport.</p>
+              <div class="plan-price">$25 <span class="plan-period">/ mois</span></div>
               <ul class="plan-features">
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> 300 Mesaj pa mwa</li>
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Maksimòm 15 mesaj pa jou</li>
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Fast Lane Tranzaksyonèl</li>
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Boukliye Spintax & Hash</li>
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Sipò pa imel</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> 300 Messages par mois</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Jusqu'à 15 messages par jour</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Fast Lane Transactionnel</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Bouclier Spintax & Hash</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Support par email</li>
               </ul>
             </div>
             <button class="btn btn-secondary" onclick="openModal('modal-auth', 'register');">
-              <i data-lucide="user-plus" class="icon-sm"></i> Chwazi Starter
+              <i data-lucide="user-plus" class="icon-sm"></i> Choisir Starter
             </button>
           </div>
 
           <!-- Pro Business Plan -->
           <div class="card pricing-card popular">
-            <span class="badge badge-primary pricing-badge-popular">Popilè</span>
+            <span class="badge badge-primary pricing-badge-popular">Recommandé</span>
             <div>
               <div class="plan-name">Pro Business</div>
-              <p style="color: var(--text-muted); font-size: 0.85rem;">Pou biznis ak lekòl ki gen gwo koule kliyan regilye.</p>
-              <div class="plan-price">$75 <span class="plan-period">/ mwa</span></div>
+              <p style="color: var(--text-muted); font-size: 0.85rem;">Pour les entreprises et institutions avec un flux régulier de clients.</p>
+              <div class="plan-price">$75 <span class="plan-period">/ mois</span></div>
               <ul class="plan-features">
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> 3,000 Mesaj pa mwa</li>
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Jiska 100 mesaj pa jou</li>
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Fast Lane + Slow Lane Paced</li>
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Sipò Fakti PDF otomatik</li>
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Webhooks an tan reyèl</li>
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Sipò Priyoritè 7/7</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> 3 000 Messages par mois</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Jusqu'à 100 messages par jour</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Fast Lane + Slow Lane Temporisé</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Pièces jointes PDF automatiques</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Webhooks temps réel</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Support prioritaire 7j/7</li>
               </ul>
             </div>
             <button class="btn btn-primary" onclick="openModal('modal-auth', 'register');">
-              <i data-lucide="zap" class="icon-sm"></i> Chwazi Pro
+              <i data-lucide="zap" class="icon-sm"></i> Choisir Pro
             </button>
           </div>
 
@@ -322,32 +323,32 @@
           <div class="card pricing-card">
             <div>
               <div class="plan-name">Enterprise Illimité</div>
-              <p style="color: var(--text-muted); font-size: 0.85rem;">Pou gwo enstitisyon ki bezwen volim illimité ak SIM dedye.</p>
-              <div class="plan-price">Illimité <span class="plan-period">/ mwa</span></div>
+              <p style="color: var(--text-muted); font-size: 0.85rem;">Pour les grands groupes nécessitant des numéros SIM dédiés et un volume illimité.</p>
+              <div class="plan-price">Illimité <span class="plan-period">/ mois</span></div>
               <ul class="plan-features">
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Mesaj Illimité san restriksyon</li>
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Liy SIM Dedye nan Cluster a</li>
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Boukliye Anti-Bann VIP</li>
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> SLA 99.9% Disponibilite</li>
-                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Asistans Enstalasyon sou VPS</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Messages Illimités sans restriction</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Lignes SIM Dédiées dans le cluster</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Bouclier Anti-Ban VIP Avancé</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> SLA 99.9% de Disponibilité</li>
+                <li class="plan-feature-item"><i data-lucide="check" class="icon-sm"></i> Accompagnement technique dédié</li>
               </ul>
             </div>
             <button class="btn btn-secondary" onclick="openModal('modal-auth', 'register');">
-              <i data-lucide="phone-call" class="icon-sm"></i> Chwazi Enterprise
+              <i data-lucide="phone-call" class="icon-sm"></i> Choisir Enterprise
             </button>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Quick API Playground -->
+    <!-- Guide Rapide API REST -->
     <section id="api-docs" class="section">
       <div class="container">
         <div class="section-header">
-          <span class="section-tag">Entegrasyon Fasil</span>
-          <h2 class="section-title">Kòmanse Voye Mesaj nan 2 Minit</h2>
+          <span class="section-tag">Intégration Rapide</span>
+          <h2 class="section-title">Commencez à Envoyer en 2 Minutes</h2>
           <p class="section-desc">
-            Entegre API nou an nan nenpòt langaj pwogramasyon (Node.js, Python, PHP, Laravel, C#).
+            Intégrez notre API dans vos logiciels (Node.js, Python, PHP, Laravel, C#, Postman).
           </p>
         </div>
 
@@ -356,143 +357,143 @@
             <span><i data-lucide="terminal" class="icon-sm"></i> POST /api/v1/messages/send</span>
             <span>JSON / HTTPS</span>
           </div>
-          <pre><code>curl -X POST "https://gateway.cvisual.com/api/v1/messages/send" \
-  -H "Authorization: Bearer cv_live_your_secret_key" \
+          <pre><code>curl -X POST "https://cvisual-whatsapp-gateway.onrender.com/api/v1/messages/send" \
+  -H "Authorization: Bearer cv_live_votre_cle_api" \
   -H "Content-Type: application/json" \
   -d '{
     "to": "50931234567",
-    "message": "{Bonjour|Salut} Jean! Resi peman w pou mwa sa a pare.",
+    "message": "{Bonjour|Salut} Jean ! Votre reçu de paiement est disponible.",
     "kind": "receipt",
     "pdf_base64": "JVBERi0xLjQKJ...",
-    "pdf_file_name": "Fakti-Jean.pdf"
+    "pdf_file_name": "Facture-Jean.pdf"
   }'</code></pre>
         </div>
       </div>
     </section>
   </main>
 
-  <!-- ================= VIEW 2: CLIENT DASHBOARD ================= -->
+  <!-- ================= VUE 2: TABLEAU DE BORD CLIENT ================= -->
   <main id="view-client-dashboard" class="dashboard-view">
     <div class="container">
       <div class="dashboard-header">
         <div class="dashboard-title-group">
-          <h1 id="client-company-title">Kont Kliyan</h1>
-          <p>Prepare mesaj otomatik ou yo, gade kle API ou, epi swiv tout outbox la.</p>
+          <h1 id="client-company-title">Espace Client</h1>
+          <p>Gérez vos envois automatisés, vos clés API et consultez l'état de votre file d'attente.</p>
         </div>
         <div style="display: flex; gap: 12px; align-items: center;">
           <span id="client-account-status" class="badge badge-success">
-            <i data-lucide="check-circle" class="icon-sm"></i> Aktif
+            <i data-lucide="check-circle" class="icon-sm"></i> Actif
           </span>
           <button class="btn btn-secondary btn-sm" onclick="openModal('modal-upgrade-plan');">
-            <i data-lucide="arrow-up-circle" class="icon-sm"></i> Chanje Plan
+            <i data-lucide="arrow-up-circle" class="icon-sm"></i> Changer de Forfait
           </button>
         </div>
       </div>
 
-      <!-- Stats Grid -->
+      <!-- Grille des Métriques -->
       <div class="stats-grid">
         <div class="stat-metric-card">
           <div class="stat-metric-icon"><i data-lucide="package" class="icon-md"></i></div>
           <div>
             <div class="stat-metric-val" id="client-plan-tier">STARTER</div>
-            <div class="stat-metric-sub">Plan Aktyèl</div>
+            <div class="stat-metric-sub">Forfait Actuel</div>
           </div>
         </div>
         <div class="stat-metric-card">
           <div class="stat-metric-icon"><i data-lucide="send" class="icon-md"></i></div>
           <div>
             <div class="stat-metric-val" id="client-monthly-quota-display">300</div>
-            <div class="stat-metric-sub">Plafon Mesaj / Mwa</div>
+            <div class="stat-metric-sub">Plafond Mensuel</div>
           </div>
         </div>
         <div class="stat-metric-card">
           <div class="stat-metric-icon"><i data-lucide="calendar" class="icon-md"></i></div>
           <div>
             <div class="stat-metric-val" id="client-daily-quota-display">15</div>
-            <div class="stat-metric-sub">Plafon Mesaj / Jou</div>
+            <div class="stat-metric-sub">Plafond Journalier</div>
           </div>
         </div>
         <div class="stat-metric-card">
           <div class="stat-metric-icon"><i data-lucide="shield-check" class="icon-md"></i></div>
           <div>
-            <div class="stat-metric-val" style="color: var(--accent-success);">Limen</div>
-            <div class="stat-metric-sub">Zero-Ban Shield</div>
+            <div class="stat-metric-val" style="color: var(--accent-success);">Actif</div>
+            <div class="stat-metric-sub">Bouclier Anti-Ban</div>
           </div>
         </div>
       </div>
 
-      <!-- API Key Card -->
+      <!-- Carte Clé API -->
       <div class="card" style="margin-bottom: 32px;">
         <div class="card-title">
           <i data-lucide="key" class="icon-md"></i>
-          <span>Kle API Otantifikasyon Ou (API Key)</span>
+          <span>Votre Clé d'Authentification API (Bearer Token)</span>
         </div>
         <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 16px;">
-          Mete kle sekrè sa a nan aplikasyon ekstèn ou an (CRM, Gym, Lekòl) nan header <code>Authorization: Bearer &lt;API_KEY&gt;</code>.
+          Insérez cette clé secrète dans votre application (CRM, Logiciel de Gestion, Site Web) dans le header <code>Authorization: Bearer &lt;API_KEY&gt;</code>.
         </p>
 
         <div style="display: flex; gap: 12px; max-width: 650px;">
-          <input type="text" id="client-api-key" readonly value="cv_live_loading..." style="font-family: monospace;">
+          <input type="text" id="client-api-key" readonly value="cv_live_chargement..." style="font-family: monospace;">
           <button id="btn-copy-api-key" class="btn btn-secondary">
-            <i data-lucide="copy" class="icon-sm"></i> Kopye Kle
+            <i data-lucide="copy" class="icon-sm"></i> Copier la Clé
           </button>
         </div>
 
         <div class="code-wrapper" style="margin-top: 18px;">
           <div class="code-header">
-            <span>Kòd Entegrasyon Egzanp</span>
+            <span>Exemple d'Intégration cURL</span>
           </div>
           <pre><code id="client-code-snippet">curl ...</code></pre>
         </div>
       </div>
 
-      <!-- Message Composer & Automation -->
+      <!-- Formulaire d'Envoi & Automatisation -->
       <div class="card" style="margin-bottom: 32px;">
         <div class="card-title">
           <i data-lucide="message-square-plus" class="icon-md"></i>
-          <span>Prepare yon Mesaj Otomatik oswa Tès</span>
+          <span>Préparer un Envoi de Message ou Test</span>
         </div>
         <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 20px;">
-          Voye yon mesaj dirèk pou teste liy lan. Si se yon resi/OTP li pase nan Liy Rapid la; si se yon rapèl li pase nan Liy Dousman an.
+          Testez l'envoi direct. Si c'est un reçu ou OTP, il passera par la Fast Lane immédiate ; si c'est une relance, il sera temporisé par la Slow Lane.
         </p>
 
         <form id="form-client-send-msg">
           <div class="grid-2" style="margin-bottom: 16px;">
             <div>
-              <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Nimewo Telefòn Destinatè:</label>
-              <input type="text" id="msg-to" placeholder="Egz: 50931234567" required>
+              <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Numéro de Téléphone Destinataire :</label>
+              <input type="text" id="msg-to" placeholder="Ex: 50931234567" required>
             </div>
             <div>
-              <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Kalite Mesaj (Kanal):</label>
+              <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Type de Message (Canal) :</label>
               <select id="msg-kind">
-                <option value="receipt">Fakti / Resi (Fast Lane - Imedya)</option>
-                <option value="welcome">Mesaj Byenvini (Fast Lane - Imedya)</option>
-                <option value="otp">Kòd Sekirite OTP (Fast Lane - Imedya)</option>
-                <option value="test">Tès Kominikasyon (Fast Lane - Imedya)</option>
-                <option value="reminder">Rapèl Bòdwo (Slow Lane - 10-16 min Pacing)</option>
-                <option value="marketing">Kanpay Maketing (Slow Lane - 10-16 min Pacing)</option>
+                <option value="receipt">Facture / Reçu (Fast Lane - Immédiat)</option>
+                <option value="welcome">Message de Bienvenue (Fast Lane - Immédiat)</option>
+                <option value="otp">Code de Sécurité OTP (Fast Lane - Immédiat)</option>
+                <option value="test">Test de Connexion (Fast Lane - Immédiat)</option>
+                <option value="reminder">Relance Facture (Slow Lane - Temporisé)</option>
+                <option value="marketing">Campagne Marketing (Slow Lane - Temporisé)</option>
               </select>
             </div>
           </div>
 
           <div style="margin-bottom: 16px;">
             <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">
-              Tèks Mesaj (Sipòte Spintax tankou <code>{Bonjour|Salut}</code>):
+              Texte du Message (Supporte Spintax tel que <code>{Bonjour|Salut}</code>) :
             </label>
-            <textarea id="msg-text" rows="4" placeholder="{Bonjour|Salut} Cher kliyan, nou kontan enfòme w ke kont ou pare." required></textarea>
+            <textarea id="msg-text" rows="4" placeholder="{Bonjour|Salut} Cher client, votre reçu est disponible." required></textarea>
           </div>
 
-          <!-- PDF Attachment -->
+          <!-- Pièce Jointe PDF -->
           <div style="margin-bottom: 20px;">
             <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">
-              Fakti / Dokiman PDF (Opsyonèl):
+              Document PDF à Joindre (Optionnel) :
             </label>
             <input type="file" id="client-pdf-input" accept="application/pdf" style="display:none;">
             <div style="display:flex; gap:12px; align-items:center;">
               <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('client-pdf-input').click();">
-                <i data-lucide="paperclip" class="icon-sm"></i> Chwazi Fichye PDF
+                <i data-lucide="paperclip" class="icon-sm"></i> Joindre un Fichier PDF
               </button>
-              <div id="client-pdf-selected" style="display:none; align-items:center; gap:8px; font-size:0.85rem; color:#34d399;">
+              <div id="client-pdf-selected" style="display:none; align-items:center; gap:8px; font-size:0.85rem; color:#059669;">
                 <i data-lucide="file-text" class="icon-sm"></i>
                 <span id="client-pdf-filename">document.pdf</span>
                 <button type="button" class="btn btn-sm btn-danger" onclick="window.clientController.removePdf();" style="padding:2px 6px;">
@@ -503,20 +504,20 @@
           </div>
 
           <button type="submit" id="btn-send-message" class="btn btn-primary">
-            <i data-lucide="send" class="icon-sm"></i> Voye Mesaj la
+            <i data-lucide="send" class="icon-sm"></i> Envoyer le Message
           </button>
         </form>
       </div>
 
-      <!-- Outbox & Delivery Log -->
+      <!-- Historique d'Envoi (Outbox) -->
       <div class="card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
           <div class="card-title" style="margin-bottom:0;">
             <i data-lucide="inbox" class="icon-md"></i>
-            <span>Istorik Mesaj Ou Yo (Outbox)</span>
+            <span>Historique des Messages (Outbox)</span>
           </div>
           <button id="btn-refresh-outbox" class="btn btn-secondary btn-sm">
-            <i data-lucide="refresh-cw" class="icon-sm"></i> Rafrechi
+            <i data-lucide="refresh-cw" class="icon-sm"></i> Actualiser
           </button>
         </div>
 
@@ -524,18 +525,18 @@
           <table>
             <thead>
               <tr>
-                <th>Destinatè</th>
-                <th>Kanal</th>
-                <th>Tip</th>
-                <th>Estati</th>
-                <th>Liy WhatsApp</th>
-                <th>Dat / Lè</th>
+                <th>Destinataire</th>
+                <th>Canal</th>
+                <th>Type</th>
+                <th>Statut</th>
+                <th>Ligne WhatsApp</th>
+                <th>Date / Heure</th>
               </tr>
             </thead>
             <tbody id="client-outbox-tbody">
               <tr>
                 <td colspan="6" style="text-align:center; color: var(--text-muted); padding: 30px;">
-                  Chaje mesaj...
+                  Chargement des messages...
                 </td>
               </tr>
             </tbody>
@@ -545,149 +546,226 @@
     </div>
   </main>
 
-  <!-- ================= VIEW 3: ADMIN DASHBOARD ================= -->
+  <!-- ================= VUE 3: CENTRE DE CONTRÔLE ADMINISTRATEUR ================= -->
   <main id="view-admin-dashboard" class="dashboard-view">
     <div class="container">
       <div class="dashboard-header">
         <div class="dashboard-title-group">
-          <h1>Sant Kontwòl Administratè</h1>
-          <p>Valide kont kliyan yo, jere cluster WhatsApp SIM yo, epi kontwole tout trafik la.</p>
+          <h1>Centre de Contrôle Administrateur</h1>
+          <p>Validez les comptes clients, gérez le cluster WhatsApp Multi-SIM et configurez les règles de temporisation anti-ban.</p>
         </div>
         <div style="display:flex; gap:12px;">
           <button class="btn btn-primary btn-sm" onclick="openModal('modal-add-line');">
-            <i data-lucide="plus-circle" class="icon-sm"></i> Ajoute yon Liy SIM
+            <i data-lucide="plus-circle" class="icon-sm"></i> Ajouter une Ligne SIM
           </button>
           <button class="btn btn-secondary btn-sm" onclick="window.adminController.refreshDashboard();">
-            <i data-lucide="refresh-cw" class="icon-sm"></i> Rafrechi Tout
+            <i data-lucide="refresh-cw" class="icon-sm"></i> Tout Actualiser
           </button>
         </div>
       </div>
 
-      <!-- Admin Global Metrics -->
+      <!-- Métriques Administrateur -->
       <div class="stats-grid">
         <div class="stat-metric-card">
           <div class="stat-metric-icon"><i data-lucide="users" class="icon-md"></i></div>
           <div>
             <div class="stat-metric-val" id="admin-stat-tenants">0</div>
-            <div class="stat-metric-sub">Total Kliyan (Tenants)</div>
+            <div class="stat-metric-sub">Total Clients Enregistrés</div>
           </div>
         </div>
         <div class="stat-metric-card">
-          <div class="stat-metric-icon"><i data-lucide="clock" class="icon-md" style="color:#fbbf24;"></i></div>
+          <div class="stat-metric-icon"><i data-lucide="clock" class="icon-md" style="color:#d97706;"></i></div>
           <div>
-            <div class="stat-metric-val" id="admin-stat-pending" style="color:#fbbf24;">0</div>
-            <div class="stat-metric-sub">Demann an Atant Validasyon</div>
+            <div class="stat-metric-val" id="admin-stat-pending" style="color:#d97706;">0</div>
+            <div class="stat-metric-sub">Demandes en Attente</div>
           </div>
         </div>
         <div class="stat-metric-card">
-          <div class="stat-metric-icon"><i data-lucide="radio" class="icon-md" style="color:#34d399;"></i></div>
+          <div class="stat-metric-icon"><i data-lucide="radio" class="icon-md" style="color:#059669;"></i></div>
           <div>
             <div class="stat-metric-val" id="admin-stat-lines">0 / 0</div>
-            <div class="stat-metric-sub">Liy WhatsApp READY</div>
+            <div class="stat-metric-sub">Lignes WhatsApp Prêtes</div>
           </div>
         </div>
         <div class="stat-metric-card">
           <div class="stat-metric-icon"><i data-lucide="check-check" class="icon-md"></i></div>
           <div>
             <div class="stat-metric-val" id="admin-stat-messages">0</div>
-            <div class="stat-metric-sub">Mesaj Delivre Resamman</div>
+            <div class="stat-metric-sub">Messages Délivrés</div>
           </div>
         </div>
       </div>
 
-      <!-- Section: Pending Plan Requests to Validate -->
+      <!-- Section: Demandes Clients à Valider -->
       <div class="card" style="margin-bottom: 32px;">
         <div class="card-title">
-          <i data-lucide="user-check" class="icon-md" style="color:#fbbf24;"></i>
-          <span>Demann Kliyan pou Valide (Validasyon Kont & Plan)</span>
+          <i data-lucide="user-check" class="icon-md" style="color:#d97706;"></i>
+          <span>Demandes d'Inscriptions & de Forfaits en Attente de Validation</span>
         </div>
         <p style="color: var(--text-muted); font-size:0.88rem; margin-bottom:18px;">
-          Lè yon kliyan kreye yon kont oswa mande yon plan, klike sou "Valide Kont" pou aktive kle API li otomatikman.
+          Lorsqu'un client s'inscrit ou demande un forfait, cliquez sur "Valider" pour activer son compte et sa clé API en direct.
         </p>
 
         <div class="table-wrapper">
           <table>
             <thead>
               <tr>
-                <th>Antrepriz</th>
-                <th>Imel</th>
-                <th>Plan Mande</th>
-                <th>Dat Demann</th>
-                <th>Aksyon</th>
+                <th>Entreprise</th>
+                <th>Email</th>
+                <th>Forfait Demandé</th>
+                <th>Date</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody id="admin-requests-tbody">
-              <tr><td colspan="5" style="text-align:center; padding:20px;">Ap chache demann...</td></tr>
+              <tr><td colspan="5" style="text-align:center; padding:20px;">Recherche des demandes...</td></tr>
             </tbody>
           </table>
         </div>
       </div>
 
-      <!-- Section: WhatsApp Cluster Lines Management -->
+      <!-- Section: Cluster Multi-Lignes WhatsApp -->
       <div class="card" style="margin-bottom: 32px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
           <div class="card-title" style="margin-bottom:0;">
             <i data-lucide="smartphone" class="icon-md"></i>
-            <span>Cluster Liy WhatsApp (Multi-SIM)</span>
+            <span>Cluster Lignes WhatsApp (Multi-SIM)</span>
           </div>
           <button class="btn btn-secondary btn-sm" onclick="window.adminController.fetchWhatsAppAccounts();">
-            <i data-lucide="rotate-cw" class="icon-sm"></i> Tcheke Liy yo
+            <i data-lucide="rotate-cw" class="icon-sm"></i> Vérifier les Lignes
           </button>
         </div>
 
         <div id="admin-accounts-grid" class="grid-3">
-          <!-- Dynamic Account Cards injected by admin.js -->
+          <!-- Cartes injectées par admin.js -->
         </div>
       </div>
 
-      <!-- Section: All Registered Tenants -->
+      <!-- Section: GESTION DES DÉLAIS & RÈGLES ANTI-BAN EN DIRECT -->
+      <div class="card" style="margin-bottom: 32px;">
+        <div class="card-title">
+          <i data-lucide="sliders" class="icon-md" style="color:var(--accent-primary);"></i>
+          <span>Gestion des Délais, Quotas & Règles Anti-Ban (Configuration Moteur)</span>
+        </div>
+        <p style="color: var(--text-muted); font-size:0.88rem; margin-bottom:20px;">
+          Ajustez en temps réel le rythme d'envoi et les limites de messages par SIM sans redémarrer le serveur.
+        </p>
+
+        <form id="form-engine-settings">
+          <div class="grid-3" style="margin-bottom:16px;">
+            <div>
+              <label style="display:block; font-size:0.85rem; font-weight:600; color:var(--text-muted); margin-bottom:6px;">
+                Limite de Relances par SIM / Jour :
+              </label>
+              <input type="number" id="setting-daily-limit" min="10" max="1000" required>
+              <span style="font-size:0.75rem; color:var(--text-dim);">Plafond pour la ligne Slow Lane (Ex: 50, 100, 200)</span>
+            </div>
+
+            <div>
+              <label style="display:block; font-size:0.85rem; font-weight:600; color:var(--text-muted); margin-bottom:6px;">
+                Intervalle Slow Lane (Minutes) :
+              </label>
+              <input type="number" id="setting-slow-interval" min="1" max="60" required>
+              <span style="font-size:0.75rem; color:var(--text-dim);">Délai de base entre chaque message de relance</span>
+            </div>
+
+            <div>
+              <label style="display:block; font-size:0.85rem; font-weight:600; color:var(--text-muted); margin-bottom:6px;">
+                Variation Aléatoire Jitter (Secondes) :
+              </label>
+              <input type="number" id="setting-slow-jitter" min="0" max="600" required>
+              <span style="font-size:0.75rem; color:var(--text-dim);">Variation anti-détection aléatoire</span>
+            </div>
+          </div>
+
+          <div class="grid-2" style="margin-bottom:16px;">
+            <div>
+              <label style="display:block; font-size:0.85rem; font-weight:600; color:var(--text-muted); margin-bottom:6px;">
+                Pause de Repos après chaque N messages :
+              </label>
+              <input type="number" id="setting-pause-threshold" min="3" max="50" required>
+              <span style="font-size:0.75rem; color:var(--text-dim);">Ex: Faire une pause après 5 ou 10 messages</span>
+            </div>
+
+            <div>
+              <label style="display:block; font-size:0.85rem; font-weight:600; color:var(--text-muted); margin-bottom:6px;">
+                Durée de la Pause de Repos (Minutes) :
+              </label>
+              <input type="number" id="setting-pause-duration" min="1" max="60" required>
+              <span style="font-size:0.75rem; color:var(--text-dim);">Temps de repos pour laisser respirer la SIM</span>
+            </div>
+          </div>
+
+          <div class="grid-2" style="margin-bottom:20px;">
+            <div>
+              <label style="display:block; font-size:0.85rem; font-weight:600; color:var(--text-muted); margin-bottom:6px;">
+                Délai Fast Lane Minimum (Secondes) :
+              </label>
+              <input type="number" id="setting-fast-min" min="1" max="10" required>
+            </div>
+
+            <div>
+              <label style="display:block; font-size:0.85rem; font-weight:600; color:var(--text-muted); margin-bottom:6px;">
+                Délai Fast Lane Maximum (Secondes) :
+              </label>
+              <input type="number" id="setting-fast-max" min="2" max="30" required>
+            </div>
+          </div>
+
+          <button type="submit" id="btn-save-settings" class="btn btn-primary">
+            <i data-lucide="save" class="icon-sm"></i> Enregistrer les Paramètres
+          </button>
+        </form>
+      </div>
+
+      <!-- Section: Liste des Clients Enregistrés -->
       <div class="card" style="margin-bottom: 32px;">
         <div class="card-title">
           <i data-lucide="building" class="icon-md"></i>
-          <span>Tout Kliyan ki Anrejistre nan Sistèm nan</span>
+          <span>Tous les Clients Enregistrés sur la Passerelle</span>
         </div>
 
         <div class="table-wrapper">
           <table>
             <thead>
               <tr>
-                <th>Non Kliyan</th>
-                <th>Imel</th>
-                <th>Plan</th>
-                <th>Kle API</th>
-                <th>Estati</th>
-                <th>Aksyon</th>
+                <th>Entreprise</th>
+                <th>Email</th>
+                <th>Forfait</th>
+                <th>Clé API</th>
+                <th>Statut</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody id="admin-tenants-tbody">
-              <tr><td colspan="6" style="text-align:center; padding:20px;">Chaje kliyan...</td></tr>
+              <tr><td colspan="6" style="text-align:center; padding:20px;">Chargement des clients...</td></tr>
             </tbody>
           </table>
         </div>
       </div>
 
-      <!-- Section: Global Message Stream -->
+      <!-- Section: Trafic Global des Messages -->
       <div class="card">
         <div class="card-title">
           <i data-lucide="activity" class="icon-md"></i>
-          <span>Trafik Global Mesaj nan Tout Cluster a</span>
+          <span>Flux Global des Messages sur l'Ensemble du Cluster</span>
         </div>
 
         <div class="table-wrapper">
           <table>
             <thead>
               <tr>
-                <th>ID Mesaj</th>
-                <th>Kliyan</th>
-                <th>Destinatè</th>
-                <th>Kanal</th>
-                <th>Tip</th>
-                <th>Estati</th>
-                <th>Lè</th>
+                <th>ID Message</th>
+                <th>Client</th>
+                <th>Destinataire</th>
+                <th>Canal</th>
+                <th>Type</th>
+                <th>Statut</th>
+                <th>Heure</th>
               </tr>
             </thead>
             <tbody id="admin-outbox-tbody">
-              <tr><td colspan="7" style="text-align:center; padding:20px;">Chaje trafik...</td></tr>
+              <tr><td colspan="7" style="text-align:center; padding:20px;">Chargement du trafic...</td></tr>
             </tbody>
           </table>
         </div>
@@ -695,78 +773,78 @@
     </div>
   </main>
 
-  <!-- ================= MODAL: AUTHENTICATION (LOGIN / REGISTER) ================= -->
+  <!-- ================= MODALE: CONNEXION / INSCRIPTION ================= -->
   <div id="modal-auth" class="modal-overlay">
     <div class="modal-box">
       <div class="modal-header">
-        <h3 id="modal-auth-title" style="font-size: 1.2rem; font-weight: 700;">Aksè Platfòm CVISUAL</h3>
+        <h3 id="modal-auth-title" style="font-size: 1.2rem; font-weight: 700;">Accès CVISUAL AUTOMATISATION</h3>
         <button class="modal-close" onclick="closeModal('modal-auth');">
           <i data-lucide="x" class="icon-md"></i>
         </button>
       </div>
 
-      <!-- Tabs -->
+      <!-- Onglets -->
       <div style="display:flex; border-bottom:1px solid var(--border-color); margin-bottom:20px;">
-        <button id="tab-btn-login" class="btn btn-sm active" style="flex:1; border-radius:0; border-bottom:2px solid var(--accent-primary);">Konekte</button>
-        <button id="tab-btn-register" class="btn btn-sm" style="flex:1; border-radius:0;">Kreye Kont</button>
+        <button id="tab-btn-login" class="btn btn-sm active" style="flex:1; border-radius:0; border-bottom:2px solid var(--accent-primary);">Se Connecter</button>
+        <button id="tab-btn-register" class="btn btn-sm" style="flex:1; border-radius:0;">Créer un Compte</button>
       </div>
 
-      <!-- Form Login -->
+      <!-- Formulaire Connexion -->
       <form id="form-login">
         <div style="margin-bottom:14px;">
-          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Adrès Imel:</label>
+          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Adresse Email :</label>
           <input type="email" id="login-email" placeholder="laurorejeanclarens0@gmail.com" required>
         </div>
         <div style="margin-bottom:20px;">
-          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Modpas:</label>
+          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Mot de Passe :</label>
           <input type="password" id="login-password" placeholder="••••••••" required>
         </div>
         <button type="submit" class="btn btn-primary" style="width:100%;">
-          <i data-lucide="log-in" class="icon-sm"></i> Konekte nan Kont Ou
+          <i data-lucide="log-in" class="icon-sm"></i> Se Connecter
         </button>
       </form>
 
-      <!-- Form Register -->
+      <!-- Formulaire Inscription -->
       <form id="form-register" style="display:none;">
         <div style="margin-bottom:12px;">
-          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Non Antrepriz / Gym / Lekòl:</label>
-          <input type="text" id="register-company" placeholder="Egz: Santral Gym Ayiti" required>
+          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Nom de l'Entreprise / Salle / Clinique :</label>
+          <input type="text" id="register-company" placeholder="Ex: Gym Central" required>
         </div>
         <div style="margin-bottom:12px;">
-          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Adrès Imel:</label>
-          <input type="email" id="register-email" placeholder="kontak@antrepriz.com" required>
+          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Adresse Email Professionnelle :</label>
+          <input type="email" id="register-email" placeholder="contact@entreprise.com" required>
         </div>
         <div style="margin-bottom:12px;">
-          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Modpas:</label>
+          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Mot de Passe :</label>
           <input type="password" id="register-password" placeholder="••••••••" required>
         </div>
         <div style="margin-bottom:20px;">
-          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Chwazi Plan:</label>
+          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Sélectionner un Forfait :</label>
           <select id="register-plan">
-            <option value="starter">Starter Debitan (300 mesaj / mwa)</option>
-            <option value="pro">Pro Business (3,000 mesaj / mwa)</option>
-            <option value="enterprise">Enterprise Illimité (Mesaj san limit)</option>
+            <option value="starter">Starter Débutant (300 messages / mois)</option>
+            <option value="pro">Pro Business (3 000 messages / mois)</option>
+            <option value="enterprise">Enterprise Illimité (Volume sans limite)</option>
           </select>
         </div>
         <button type="submit" class="btn btn-primary" style="width:100%;">
-          <i data-lucide="user-plus" class="icon-sm"></i> Kreye Kont & Mande Plan
+          <i data-lucide="user-plus" class="icon-sm"></i> Créer mon Compte
         </button>
       </form>
     </div>
   </div>
 
-  <!-- ================= MODAL: QR CODE SCANNER ================= -->
+  <!-- ================= MODALE: SCANNER DE CODE QR WHATSAPP ================= -->
   <div id="modal-qr-view" class="modal-overlay">
     <div class="modal-box" style="text-align: center;">
       <div class="modal-header">
-        <h3 id="modal-qr-line-label" style="font-size: 1.2rem; font-weight: 700;">Koneksyon WhatsApp</h3>
+        <h3 id="modal-qr-line-label" style="font-size: 1.2rem; font-weight: 700;">Connexion WhatsApp</h3>
         <button class="modal-close" onclick="closeModal('modal-qr-view');">
           <i data-lucide="x" class="icon-md"></i>
         </button>
       </div>
 
       <p id="modal-qr-status-text" style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 16px;">
-        Ouvri WhatsApp sou telefòn ou > Aparèy lye > Eskane kòd sa a:
+        Ouvrez WhatsApp sur votre téléphone > Appareils connectés > Scannez ce code :
       </p>
 
       <div class="qr-container">
@@ -774,16 +852,16 @@
       </div>
 
       <p style="font-size: 0.78rem; color: var(--text-dim); margin-top: 12px;">
-        Kòd la ap rafrechi otomatikman. Dèske w fin eskane l, liy lan ap vin READY.
+        Génération instantanée en mémoire. Dès le scan terminé, la ligne devient CONNECTÉE (READY).
       </p>
     </div>
   </div>
 
-  <!-- ================= MODAL: ADD WHATSAPP LINE ================= -->
+  <!-- ================= MODALE: AJOUTER UNE LIGNE SIM ================= -->
   <div id="modal-add-line" class="modal-overlay">
     <div class="modal-box">
       <div class="modal-header">
-        <h3 style="font-size: 1.2rem; font-weight: 700;">Ajoute yon Nouvo Liy SIM nan Cluster</h3>
+        <h3 style="font-size: 1.2rem; font-weight: 700;">Ajouter une Ligne SIM dans le Cluster</h3>
         <button class="modal-close" onclick="closeModal('modal-add-line');">
           <i data-lucide="x" class="icon-md"></i>
         </button>
@@ -791,56 +869,56 @@
 
       <form id="form-add-line">
         <div style="margin-bottom:14px;">
-          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Nimewo Endèks Liy (1, 2, 3...):</label>
-          <input type="number" id="add-line-index" placeholder="Egz: 3" min="1" required>
+          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Index de la Ligne (1, 2, 3...) :</label>
+          <input type="number" id="add-line-index" placeholder="Ex: 3" min="1" required>
         </div>
         <div style="margin-bottom:14px;">
-          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Etikèt Liy lan:</label>
-          <input type="text" id="add-line-label" placeholder="Egz: SIM Sekou 3" required>
+          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Libellé de la Ligne :</label>
+          <input type="text" id="add-line-label" placeholder="Ex: SIM Secours 3" required>
         </div>
         <div style="margin-bottom:20px;">
-          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Limit Rapèl Pa Jou (Plafon Anti-Bann):</label>
-          <input type="number" id="add-line-limit" value="25" min="5" max="50" required>
+          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Plafond Relances / Jour (Règle Anti-Ban) :</label>
+          <input type="number" id="add-line-limit" value="50" min="5" max="500" required>
         </div>
         <button type="submit" class="btn btn-primary" style="width:100%;">
-          <i data-lucide="plus-circle" class="icon-sm"></i> Enskri Liy lan nan Cluster
+          <i data-lucide="plus-circle" class="icon-sm"></i> Enregistrer la Ligne
         </button>
       </form>
     </div>
   </div>
 
-  <!-- ================= MODAL: UPGRADE PLAN REQUEST ================= -->
+  <!-- ================= MODALE: DEMANDE DE CHANGEMENT DE FORFAIT ================= -->
   <div id="modal-upgrade-plan" class="modal-overlay">
     <div class="modal-box">
       <div class="modal-header">
-        <h3 style="font-size: 1.2rem; font-weight: 700;">Mande yon Chanjman Plan</h3>
+        <h3 style="font-size: 1.2rem; font-weight: 700;">Changer de Forfait</h3>
         <button class="modal-close" onclick="closeModal('modal-upgrade-plan');">
           <i data-lucide="x" class="icon-md"></i>
         </button>
       </div>
 
       <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px;">
-        Chwazi plan ou vle pase a. Administratè a ap resevwa demann lan epi valide l touswit.
+        Sélectionnez le forfait souhaité. L'administrateur validera immédiatement la mise à niveau.
       </p>
 
       <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
         <button class="btn btn-secondary" style="justify-content:space-between;" onclick="window.clientController.submitPlanUpgrade('starter');">
-          <span>Starter (300 mesaj / mwa)</span>
-          <strong>$25/mwa</strong>
+          <span>Starter (300 messages / mois)</span>
+          <strong>$25/mois</strong>
         </button>
         <button class="btn btn-primary" style="justify-content:space-between;" onclick="window.clientController.submitPlanUpgrade('pro');">
-          <span>Pro Business (3,000 mesaj / mwa)</span>
-          <strong>$75/mwa</strong>
+          <span>Pro Business (3 000 messages / mois)</span>
+          <strong>$75/mois</strong>
         </button>
         <button class="btn btn-secondary" style="justify-content:space-between;" onclick="window.clientController.submitPlanUpgrade('enterprise');">
-          <span>Enterprise Illimité (San Limit)</span>
-          <strong>Kontakte</strong>
+          <span>Enterprise Illimité (Volume sans limite)</span>
+          <strong>Contacter</strong>
         </button>
       </div>
     </div>
   </div>
 
-  <!-- Main Application Scripts -->
+  <!-- Scripts JavaScript -->
   <script src="js/app.js"></script>
   <script src="js/client.js"></script>
   <script src="js/admin.js"></script>
