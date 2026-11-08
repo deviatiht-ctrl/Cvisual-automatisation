@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  cvisual-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cvisual-whatsapp-gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+      - PUPPETEER_HEADLESS=true
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - ADMIN_EMAILS=laurorejeanclarens0@gmail.com
+      - FAST_LANE_CONCURRENCY=5
+      - SLOW_LANE_INTERVAL_MIN_MS=600000
+      - SLOW_LANE_JITTER_MAX_MS=360000
+      - MAX_REMINDERS_PER_DAY=25
+      - BATCH_PAUSE_EVERY_N=5
+      - BATCH_PAUSE_MS=600000
+      - AUTH_DATA_DIR=/app/.wwebjs_auth
+    volumes:
+      - cvisual_wwebjs_auth:/app/.wwebjs_auth
+    healthcheck:
+      test: ["CMD-SHELL", "node -e 'fetch(\"http://localhost:3000/health\").then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  cvisual_wwebjs_auth:
+    name: cvisual_wwebjs_auth_data
