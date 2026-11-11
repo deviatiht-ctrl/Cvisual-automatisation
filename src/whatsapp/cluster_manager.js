@@ -1,4 +1,6 @@
-import { WhatsAppAccountInstance, cleanupTmpChromeDirs, normalizePhoneDigits } from './account_instance.js';
+import path from 'path';
+import { WhatsAppAccountInstance, normalizePhoneDigits } from './account_instance.js';
+import { sessionStore } from './session_store.js';
 import { db } from '../database.js';
 import { config } from '../config.js';
 
@@ -15,9 +17,8 @@ export class ClusterManager {
 
   async initializeCluster() {
     console.log(
-      `[Cluster Manager] Initializing WhatsApp Cluster (maxConcurrentAccounts=${config.maxConcurrentAccounts})...`
+      `[Cluster Manager] Initializing Native WhatsApp Cluster (maxConcurrentAccounts=${config.maxConcurrentAccounts})...`
     );
-    cleanupTmpChromeDirs();
 
     let dbAccounts = await db.listAccounts();
 
@@ -35,66 +36,75 @@ export class ClusterManager {
       .filter(a => a.is_enabled !== false)
       .sort((a, b) => a.account_index - b.account_index);
 
-    const primary = enabled.find(a => a.account_index === (config.securgym?.accountIndex || 1)) || enabled[0] || {
-      account_index: config.securgym?.accountIndex || 1,
-      label: 'Liy Prensipal 1'
+    const primaryIdx = config.securgym?.accountIndex || 1;
+    const primary = enabled.find(a => a.account_index === primaryIdx) || enabled[0] || {
+      account_index: primaryIdx,
+      label: `Liy Prensipal ${primaryIdx}`
     };
 
+    const backedUpIndices = await sessionStore.listBackedUpIndices().catch(() => new Set());
+
+    // Always start the primary line, plus any additional enabled line that already has a saved registered session
     const toStart = [primary];
     for (const acc of enabled) {
       if (toStart.length >= config.maxConcurrentAccounts) break;
-      if (acc.account_index !== primary.account_index) {
+      if (acc.account_index === primary.account_index) continue;
+      const localPath = path.join(config.authDataDir, `baileys-account-${acc.account_index}`);
+      if (backedUpIndices.has(acc.account_index) || sessionStore.hasLocalSession(localPath)) {
         toStart.push(acc);
       }
     }
 
-    // Register managed instances synchronously so status/reset routes never miss them at startup
     const registered = [];
     for (const acc of toStart) {
       const idx = parseInt(acc.account_index, 10);
       if (!this.accounts.has(idx) && this.accounts.size < config.maxConcurrentAccounts) {
-        registered.push(new WhatsAppAccountInstance(idx, acc.label || `Liy ${idx}`));
-        this.accounts.set(idx, registered[registered.length - 1]);
+        const inst = new WhatsAppAccountInstance(idx, acc.label || `Liy ${idx}`);
+        this.accounts.set(idx, inst);
+        registered.push(inst);
       }
     }
 
-    // Launch headless Chromium slightly after HTTP server finishes binding
+    // Start sockets right after HTTP server binds /health
     setTimeout(() => {
       for (const instance of registered) {
         instance.initialize().catch(err => {
           console.error(`[Cluster Manager] Error during initialization of Account ${instance.accountIndex}:`, err.message);
         });
       }
-    }, 1500);
+    }, 600);
 
     // Start CVISUAL multi-tenant dual-lane background processors
     this.startDualLaneEngines();
   }
 
-  async registerAndStartAccount(accountIndex, label) {
+  async registerAndStartAccount(accountIndex, label, { userTriggered = true } = {}) {
     const idx = parseInt(accountIndex, 10);
     if (this.accounts.has(idx)) {
-      return this.accounts.get(idx);
+      const existing = this.accounts.get(idx);
+      if (userTriggered && !existing.isReady() && !existing.isInitializing && existing.status !== 'SCAN_QR') {
+        existing.initialize({ userTriggered: true }).catch(() => {});
+      }
+      return existing;
     }
 
     if (this.accounts.size >= config.maxConcurrentAccounts) {
       console.warn(
-        `[Cluster Manager] Blocked spawning Account ${idx}: maxConcurrentAccounts (${config.maxConcurrentAccounts}) limit active to prevent OOM.`
+        `[Cluster Manager] Blocked spawning Account ${idx}: maxConcurrentAccounts (${config.maxConcurrentAccounts}) limit active.`
       );
       return null;
     }
 
-    const instance = new WhatsAppAccountInstance(idx, label);
+    const instance = new WhatsAppAccountInstance(idx, label || `Liy ${idx}`);
     this.accounts.set(idx, instance);
 
-    instance.initialize().catch(err => {
+    instance.initialize({ userTriggered }).catch(err => {
       console.error(`[Cluster Manager] Error during initialization of Account ${idx}:`, err.message);
     });
 
     return instance;
   }
 
-  // Strictly NO lazy Chromium spawning here (avoids accidental OOM on GET QR/status polls)
   getAccount(accountIndex) {
     const idx = parseInt(accountIndex, 10);
     return this.accounts.get(idx) || null;
@@ -130,7 +140,7 @@ export class ClusterManager {
     const idx = parseInt(accountIndex, 10);
     let instance = this.getAccount(idx);
     if (!instance && this.accounts.size < config.maxConcurrentAccounts) {
-      instance = await this.registerAndStartAccount(idx, `SIM Liy ${idx}`);
+      instance = await this.registerAndStartAccount(idx, `SIM Liy ${idx}`, { userTriggered: true });
       return { ok: true, message: `Account ${idx} initializing.` };
     }
     if (!instance) {
@@ -142,7 +152,12 @@ export class ClusterManager {
 
   async resetAccount(accountIndex, { awaitInit = true } = {}) {
     const idx = parseInt(accountIndex, 10);
-    const instance = this.getAccount(idx);
+    let instance = this.getAccount(idx);
+    if (!instance && this.accounts.size < config.maxConcurrentAccounts) {
+      await sessionStore.remove(idx).catch(() => {});
+      instance = await this.registerAndStartAccount(idx, `SIM Liy ${idx}`, { userTriggered: true });
+      return { ok: true, message: `Account ${idx} session reset and initializing.` };
+    }
     if (!instance) {
       throw new Error(`Account ${idx} not found in active cluster.`);
     }
@@ -169,7 +184,6 @@ export class ClusterManager {
       throw new Error('Numéro destinataire invalide (minimum 8 chiffres).');
     }
 
-    // Wait briefly up to 8s if a ready line is temporarily busy finishing an ongoing send
     let chosen = null;
     for (let attempt = 0; attempt < 16; attempt++) {
       const readyAccounts = this.getAllAccounts().filter(a => a.isReady() && !a.isBusy);
@@ -203,10 +217,6 @@ export class ClusterManager {
     };
   }
 
-  /**
-   * LRU (Least Recently Used) SIM Selection for Fast Lane
-   * Fast Lane bypasses 25/day reminder limit completely!
-   */
   async selectFastLaneAccount() {
     const readyAccounts = [];
 
@@ -229,13 +239,6 @@ export class ClusterManager {
     return readyAccounts[0].instance;
   }
 
-  /**
-   * LRU Selection for Slow Lane (Reminders & Marketing)
-   * Strictly enforces:
-   * 1. Max 25 reminders/day/SIM
-   * 2. Batch pause (10 min after every 5 reminders)
-   * 3. 10-16 min interval since last reminder
-   */
   async selectSlowLaneAccount() {
     const now = Date.now();
     const eligibleAccounts = [];
@@ -245,7 +248,7 @@ export class ClusterManager {
 
       const dbAcc = await db.getAccountByIndex(idx);
       const sentToday = Math.max(dbAcc?.sent_reminders_today || 0, inst.sentRemindersToday || 0);
-      const limit = dbAcc?.daily_reminder_limit || config.engine.slowLane.dailyReminderLimit;
+      const limit = Math.min(dbAcc?.daily_reminder_limit || config.engine.slowLane.dailyReminderLimit || 25, 25);
       if (sentToday >= limit) {
         continue;
       }
@@ -256,7 +259,6 @@ export class ClusterManager {
         continue;
       }
 
-      // Leave small buffer after Fast Lane activity so reminder doesn't burst immediately after receipt
       if (inst.lastSentAt && now - inst.lastSentAt < 15000) {
         continue;
       }

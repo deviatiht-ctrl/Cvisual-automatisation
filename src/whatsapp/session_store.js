@@ -12,6 +12,8 @@ class SessionStore {
   constructor() {
     this.bucketReady = false;
     this.inFlightBackups = new Set();
+    this.lastBackupAt = new Map();
+    this.pendingTimers = new Map();
   }
 
   isEnabled() {
@@ -19,7 +21,7 @@ class SessionStore {
   }
 
   getObjectKey(accountIndex) {
-    return `account-${parseInt(accountIndex, 10)}.tar.gz`;
+    return `baileys-account-${parseInt(accountIndex, 10)}.tar.gz`;
   }
 
   async ensureBucket() {
@@ -40,7 +42,7 @@ class SessionStore {
       if (!exists) {
         let { error: createErr } = await supabase.storage.createBucket(bucketName, {
           public: false,
-          fileSizeLimit: 45 * 1024 * 1024 // Respect Supabase free-tier 50 MiB object cap
+          fileSizeLimit: 45 * 1024 * 1024
         });
         if (createErr && !String(createErr.message || '').toLowerCase().includes('already exists')) {
           ({ error: createErr } = await supabase.storage.createBucket(bucketName, { public: false }));
@@ -63,15 +65,34 @@ class SessionStore {
   hasLocalSession(sessionDir) {
     try {
       if (!sessionDir || !fs.existsSync(sessionDir)) return false;
-      const defaultDir = path.join(sessionDir, 'Default');
-      if (fs.existsSync(defaultDir)) {
-        const entries = fs.readdirSync(defaultDir);
-        return entries.length > 0;
-      }
-      const rootEntries = fs.readdirSync(sessionDir);
-      return rootEntries.length > 0;
+      const credsFile = path.join(sessionDir, 'creds.json');
+      if (!fs.existsSync(credsFile)) return false;
+      const raw = fs.readFileSync(credsFile, 'utf8');
+      const parsed = JSON.parse(raw);
+      return Boolean(parsed && parsed.registered === true && (parsed.me?.id || parsed.signedIdentityKey));
     } catch {
       return false;
+    }
+  }
+
+  async listBackedUpIndices() {
+    if (!this.isEnabled()) return new Set();
+    try {
+      const bucketOk = await this.ensureBucket();
+      if (!bucketOk) return new Set();
+      const supabase = db.getSupabase();
+      const bucketName = config.sessionBackup.bucket || 'cvisual-wa-sessions';
+      const { data, error } = await supabase.storage.from(bucketName).list('', { limit: 100 });
+      if (error || !Array.isArray(data)) return new Set();
+
+      const indices = new Set();
+      for (const item of data) {
+        const m = /^baileys-account-(\d+)\.tar\.gz$/.exec(String(item.name || ''));
+        if (m) indices.add(parseInt(m[1], 10));
+      }
+      return indices;
+    } catch {
+      return new Set();
     }
   }
 
@@ -79,7 +100,6 @@ class SessionStore {
     if (!this.isEnabled()) return false;
     const idx = parseInt(accountIndex, 10);
 
-    // If local directory already has session files (e.g. fast restart inside same container), keep it
     if (this.hasLocalSession(sessionDir)) {
       return true;
     }
@@ -95,11 +115,7 @@ class SessionStore {
     try {
       const { data, error } = await supabase.storage.from(bucketName).download(key);
       if (error || !data) {
-        if (error && !String(error.message || '').toLowerCase().includes('not found') && error.statusCode !== '404') {
-          console.log(`[SessionStore] No stored session for Line ${idx} (${error.message || '404'})`);
-        } else {
-          console.log(`[SessionStore] No stored session backup yet for Line ${idx} — fresh QR will be generated.`);
-        }
+        console.log(`[SessionStore] No stored Baileys session yet for Line ${idx} — fresh QR ready.`);
         return false;
       }
 
@@ -113,7 +129,15 @@ class SessionStore {
       fs.mkdirSync(parentDir, { recursive: true });
       fs.writeFileSync(tmpTar, buffer);
 
-      await execFileAsync('tar', ['-xzf', tmpTar, '-C', parentDir], { timeout: 30000 });
+      await execFileAsync('tar', ['-xzf', tmpTar, '-C', parentDir], { timeout: 20000 });
+
+      if (!this.hasLocalSession(sessionDir)) {
+        try {
+          if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true });
+        } catch {}
+        return false;
+      }
+
       console.log(`[SessionStore] Restored WhatsApp session for Line ${idx} (${(buffer.length / 1024).toFixed(1)} KB).`);
       return true;
     } catch (err) {
@@ -124,6 +148,22 @@ class SessionStore {
         if (fs.existsSync(tmpTar)) fs.unlinkSync(tmpTar);
       } catch {}
     }
+  }
+
+  scheduleBackup(accountIndex, sessionDir, delayMs = 6000) {
+    if (!this.isEnabled()) return;
+    const idx = parseInt(accountIndex, 10);
+    const lastAt = this.lastBackupAt.get(idx) || 0;
+    if (Date.now() - lastAt < 45000) return;
+
+    if (this.pendingTimers.has(idx)) {
+      clearTimeout(this.pendingTimers.get(idx));
+    }
+    const timer = setTimeout(() => {
+      this.pendingTimers.delete(idx);
+      this.backup(idx, sessionDir).catch(() => {});
+    }, delayMs);
+    this.pendingTimers.set(idx, timer);
   }
 
   async backup(accountIndex, sessionDir) {
@@ -145,33 +185,10 @@ class SessionStore {
       const parentDir = path.dirname(sessionDir);
       const baseName = path.basename(sessionDir);
 
-      const excludeArgs = [
-        '--exclude=Cache',
-        '--exclude=Code Cache',
-        '--exclude=GPUCache',
-        '--exclude=DawnCache',
-        '--exclude=DawnGraphiteCache',
-        '--exclude=DawnWebGPUCache',
-        '--exclude=ShaderCache',
-        '--exclude=GrShaderCache',
-        '--exclude=GraphiteDawnCache',
-        '--exclude=CacheStorage',
-        '--exclude=ScriptCache',
-        '--exclude=blob_storage',
-        '--exclude=Crashpad',
-        '--exclude=BrowserMetrics*',
-        '--exclude=SingletonLock',
-        '--exclude=SingletonCookie',
-        '--exclude=SingletonSocket',
-        '--exclude=DevToolsActivePort',
-        '--exclude=lockfile',
-        '--exclude=LOCK'
-      ];
-
       await execFileAsync(
         'tar',
-        ['--warning=no-file-changed', '--ignore-failed-read', '-czf', tmpTar, ...excludeArgs, '-C', parentDir, baseName],
-        { timeout: 45000 }
+        ['--warning=no-file-changed', '--ignore-failed-read', '--exclude=*.tmp', '-czf', tmpTar, '-C', parentDir, baseName],
+        { timeout: 25000 }
       );
 
       const buffer = fs.readFileSync(tmpTar);
@@ -189,23 +206,10 @@ class SessionStore {
         return false;
       }
 
-      console.log(`[SessionStore] Backed up WhatsApp session for Line ${idx} (${(buffer.length / (1024 * 1024)).toFixed(2)} MB).`);
+      this.lastBackupAt.set(idx, Date.now());
+      console.log(`[SessionStore] Backed up WhatsApp session for Line ${idx} (${(buffer.length / 1024).toFixed(1)} KB).`);
       return true;
     } catch (err) {
-      // tar exit code 1 happens sometimes if Chrome mutates a file mid-archive while already writing valid tar; ignore noise
-      if (fs.existsSync(tmpTar) && fs.statSync(tmpTar).size > 1024 && Number(err.code) === 1) {
-        try {
-          const buffer = fs.readFileSync(tmpTar);
-          const { error } = await supabase.storage.from(bucketName).upload(key, buffer, {
-            upsert: true,
-            contentType: 'application/gzip'
-          });
-          if (!error) {
-            console.log(`[SessionStore] Backed up session (with code=1 warning) for Line ${idx} (${(buffer.length / (1024 * 1024)).toFixed(2)} MB).`);
-            return true;
-          }
-        } catch {}
-      }
       console.warn(`[SessionStore] Backup failed for Line ${idx}:`, err.message);
       return false;
     } finally {
@@ -217,8 +221,14 @@ class SessionStore {
   }
 
   async remove(accountIndex) {
-    if (!this.isEnabled()) return false;
     const idx = parseInt(accountIndex, 10);
+    if (this.pendingTimers.has(idx)) {
+      clearTimeout(this.pendingTimers.get(idx));
+      this.pendingTimers.delete(idx);
+    }
+    this.lastBackupAt.delete(idx);
+
+    if (!this.isEnabled()) return false;
     const bucketOk = await this.ensureBucket();
     if (!bucketOk) return false;
 

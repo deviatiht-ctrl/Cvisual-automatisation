@@ -10,6 +10,7 @@ import { config } from './config.js';
 import apiRoutes from './api/routes.js';
 import securgymRoutes from './api/securgym_routes.js';
 import { clusterManager } from './whatsapp/cluster_manager.js';
+import { sessionStore } from './whatsapp/session_store.js';
 import { securGymBridge } from './securgym/bridge_worker.js';
 
 function getCgroupMemoryMb() {
@@ -120,7 +121,7 @@ if (!process.env.VERCEL) {
     console.log(`🚀 CVISUAL STANDALONE MULTI-TENANT WHATSAPP GATEWAY & SAAS`);
     console.log(`📡 Server running on: http://0.0.0.0:${config.port}`);
     console.log(`⚙️  Environment: ${config.nodeEnv} | Node ${process.version}`);
-    console.log(`🧠 Max Concurrent Chromium Browsers: ${config.maxConcurrentAccounts}`);
+    console.log(`⚡ Engine: Native Baileys Multi-Device (Zero-Chromium Low-RAM) | Max Lines: ${config.maxConcurrentAccounts}`);
     console.log(`🛡️  Shield: Spintax + Zero-Width Invisible Unicode Hash Active`);
     console.log(`⚡ Dual-Lane Engine: Fast Lane (Instant) & Slow Lane (10-16 min, 25/day)`);
     console.log(`🏋️  SecurGYM Cloud Bridge: ${securGymBridge.isEnabled() ? 'ACTIVE' : 'DISABLED'}`);
@@ -142,6 +143,9 @@ if (!process.env.VERCEL) {
     const accounts = clusterManager.getAllAccounts();
     for (const acc of accounts) {
       try {
+        if (acc.isReady()) {
+          await sessionStore.backup(acc.accountIndex, acc.sessionPath).catch(() => {});
+        }
         await acc.destroyBrowserOnly();
       } catch {}
     }

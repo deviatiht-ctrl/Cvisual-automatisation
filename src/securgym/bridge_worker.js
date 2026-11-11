@@ -205,6 +205,18 @@ class SecurGymBridgeWorker {
     }
   }
 
+  attachAccountListeners(acc) {
+    if (!acc || acc._securgymBridgeHooked) return;
+    acc._securgymBridgeHooked = true;
+    const pushSoon = () => {
+      setTimeout(() => this.syncAndHeartbeat(), 250);
+    };
+    acc.on('qr', pushSoon);
+    acc.on('authenticated', pushSoon);
+    acc.on('ready', pushSoon);
+    acc.on('disconnected', pushSoon);
+  }
+
   async start() {
     if (!this.isEnabled()) {
       console.log('[SecurGYM Bridge] Disabled (set SECURGYM_ENABLED=true + URL/KEY to activate).');
@@ -221,16 +233,9 @@ class SecurGymBridgeWorker {
     await this.recoverStuckProcessingMessages();
     await this.sanitizePendingOutbox();
 
-    // Hook instant status events from primary account into Supabase heartbeat
-    const primary = clusterManager.getAccount(this.getAccountIndex());
-    if (primary) {
-      const pushSoon = () => {
-        setTimeout(() => this.syncAndHeartbeat(), 250);
-      };
-      primary.on('qr', pushSoon);
-      primary.on('authenticated', pushSoon);
-      primary.on('ready', pushSoon);
-      primary.on('disconnected', pushSoon);
+    // Hook instant status events from all active accounts into Supabase heartbeat
+    for (const acc of clusterManager.getAllAccounts()) {
+      this.attachAccountListeners(acc);
     }
 
     // Immediate first heartbeat & command/outbox polling
@@ -294,7 +299,7 @@ class SecurGymBridgeWorker {
   /**
    * 1. Inspects remote account flags (`RESET_REQUESTED`, `RESTART_REQUESTED`, `RESTRICTED`) BEFORE writing heartbeat.
    * 2. Cleans up stale non-managed lines stuck in `INITIALIZING`/`SCAN_QR`/`READY` (>45s stale).
-   * 3. Sends cloud heartbeats for the managed Line + global platform config.
+   * 3. Sends cloud heartbeats for all active managed lines + global platform config.
    */
   async syncAndHeartbeat() {
     if (!this.isEnabled() || this.isSyncingHeartbeat) return;
@@ -302,47 +307,58 @@ class SecurGymBridgeWorker {
 
     try {
       const managedIdx = this.getAccountIndex();
-      const acc = clusterManager.getAccount(managedIdx);
 
       // 1. Poll platform_whatsapp_accounts FIRST so Web commands are never clobbered
       const listRes = await this._rest('platform_whatsapp_accounts?order=account_index.asc');
       if (listRes.ok) {
         const rows = await listRes.json();
-        const myRow = Array.isArray(rows) ? rows.find(r => r.account_index === managedIdx) : null;
 
-        if (myRow && acc) {
-          const remoteStatus = String(myRow.service_status || '').toUpperCase();
+        for (const row of Array.isArray(rows) ? rows : []) {
+          const idx = row.account_index;
+          const remoteStatus = String(row.service_status || '').toUpperCase();
+          let acc = clusterManager.getAccount(idx);
 
           if (remoteStatus === 'RESET_REQUESTED') {
-            console.log(`[SecurGYM Bridge] 🔄 RESET_REQUESTED reçu pour Liy ${managedIdx}.`);
-            await acc.resetSession();
-            return;
+            console.log(`[SecurGYM Bridge] 🔄 RESET_REQUESTED reçu pour Liy ${idx}.`);
+            if (!acc && clusterManager.accounts.size < config.maxConcurrentAccounts) {
+              acc = await clusterManager.registerAndStartAccount(idx, row.label || `Liy ${idx}`, { userTriggered: true });
+              this.attachAccountListeners(acc);
+            }
+            if (acc) await acc.resetSession({ awaitInit: false });
+            continue;
           }
 
           if (remoteStatus === 'RESTART_REQUESTED') {
-            console.log(`[SecurGYM Bridge] 🔄 RESTART_REQUESTED reçu pour Liy ${managedIdx}.`);
-            await acc.restart();
-            return;
+            console.log(`[SecurGYM Bridge] 🔄 RESTART_REQUESTED reçu pour Liy ${idx}.`);
+            if (!acc && clusterManager.accounts.size < config.maxConcurrentAccounts) {
+              acc = await clusterManager.registerAndStartAccount(idx, row.label || `Liy ${idx}`, { userTriggered: true });
+              this.attachAccountListeners(acc);
+            } else if (acc) {
+              await acc.restart({ awaitInit: false });
+            }
+            continue;
           }
 
-          if (
-            remoteStatus === 'RESTRICTED' &&
-            myRow.restricted_until &&
-            new Date(myRow.restricted_until).getTime() > Date.now()
-          ) {
-            if (acc.status !== 'RESTRICTED') {
-              acc.status = 'RESTRICTED';
-              acc.restrictedUntil = myRow.restricted_until;
-              acc.restrictionReason = myRow.restriction_reason || 'Restriction enregistrée';
-              await acc.destroyBrowserOnly();
+          if (acc) {
+            if (
+              remoteStatus === 'RESTRICTED' &&
+              row.restricted_until &&
+              new Date(row.restricted_until).getTime() > Date.now()
+            ) {
+              if (acc.status !== 'RESTRICTED') {
+                acc.status = 'RESTRICTED';
+                acc.restrictedUntil = row.restricted_until;
+                acc.restrictionReason = row.restriction_reason || 'Restriction enregistrée';
+                await acc.destroyBrowserOnly();
+              }
+              if (idx === managedIdx) this.remoteRestrictedUntil = row.restricted_until;
+            } else if (idx === managedIdx && remoteStatus !== 'RESTRICTED' && this.remoteRestrictedUntil) {
+              this.remoteRestrictedUntil = null;
             }
-            this.remoteRestrictedUntil = myRow.restricted_until;
-          } else if (remoteStatus !== 'RESTRICTED' && this.remoteRestrictedUntil) {
-            this.remoteRestrictedUntil = null;
           }
         }
 
-        // Clean stale other lines that aren't spawned on this single-browser worker
+        // Clean stale other lines that aren't spawned on this cloud worker
         const activeIndices = new Set(clusterManager.getAllAccounts().map(a => a.accountIndex));
         for (const r of Array.isArray(rows) ? rows : []) {
           if (activeIndices.has(r.account_index)) continue;
@@ -352,44 +368,56 @@ class SecurGymBridgeWorker {
 
           if (
             ['INITIALIZING', 'AUTHENTICATED', 'SCAN_QR'].includes(st) ||
-            (st === 'READY' && isStale)
+            (st === 'READY' && isStale) ||
+            r.qr_code ||
+            (r.last_heartbeat && st === 'DISCONNECTED')
           ) {
             await this._rest(`platform_whatsapp_accounts?account_index=eq.${r.account_index}`, {
               method: 'PATCH',
               body: {
                 service_status: 'DISCONNECTED',
                 qr_code: null,
-                last_error: null
+                last_error: null,
+                last_heartbeat: null
               }
             }).catch(() => {});
           }
         }
       }
 
-      if (!acc) return;
+      const activeAccounts = clusterManager.getAllAccounts();
+      if (activeAccounts.length === 0) return;
+
+      for (const acc of activeAccounts) {
+        this.attachAccountListeners(acc);
+        const status = acc.status || 'DISCONNECTED';
+        const qrPayload = status === 'SCAN_QR' ? (acc.qrCodeDataUrl || acc.rawQrCode || null) : null;
+        const phoneVal = acc.phoneNumber || (['SCAN_QR', 'DISCONNECTED', 'ERROR'].includes(status) ? '' : null);
+        const pushVal = acc.pushName || (['SCAN_QR', 'DISCONNECTED', 'ERROR'].includes(status) ? '' : null);
+
+        await this._rpc('platform_whatsapp_account_heartbeat', {
+          p_account_index: acc.accountIndex,
+          p_service_status: status,
+          p_phone_number: phoneVal,
+          p_push_name: pushVal,
+          p_qr_code: qrPayload,
+          p_last_error: status === 'READY' ? null : (acc.lastError || null)
+        });
+      }
 
       const queueLength = await this._countPendingOutbox();
-      const status = acc.status || 'DISCONNECTED';
-      const qrPayload = status === 'SCAN_QR' ? (acc.qrCodeDataUrl || acc.rawQrCode || null) : null;
-      const phoneVal = acc.phoneNumber || (['SCAN_QR', 'DISCONNECTED', 'ERROR'].includes(status) ? '' : null);
-      const pushVal = acc.pushName || (['SCAN_QR', 'DISCONNECTED', 'ERROR'].includes(status) ? '' : null);
-
-      await this._rpc('platform_whatsapp_account_heartbeat', {
-        p_account_index: managedIdx,
-        p_service_status: status,
-        p_phone_number: phoneVal,
-        p_push_name: pushVal,
-        p_qr_code: qrPayload,
-        p_last_error: status === 'READY' ? null : (acc.lastError || null)
-      });
+      const readyRep = activeAccounts.find(a => a.isReady());
+      const primaryAcc = readyRep || clusterManager.getAccount(managedIdx) || activeAccounts[0];
+      const globalStatus = readyRep ? 'READY' : (primaryAcc?.status || 'DISCONNECTED');
+      const globalQr = globalStatus === 'SCAN_QR' ? (primaryAcc?.qrCodeDataUrl || primaryAcc?.rawQrCode || null) : null;
 
       await this._rpc('platform_whatsapp_heartbeat', {
-        p_service_status: status,
-        p_connected_phone: acc.phoneNumber || null,
-        p_push_name: acc.pushName || null,
-        p_qr_code: qrPayload,
+        p_service_status: globalStatus,
+        p_connected_phone: primaryAcc?.phoneNumber || null,
+        p_push_name: primaryAcc?.pushName || null,
+        p_qr_code: globalQr,
         p_queue_length: queueLength,
-        p_last_error: status === 'READY' ? null : (acc.lastError || null)
+        p_last_error: globalStatus === 'READY' ? null : (primaryAcc?.lastError || null)
       });
     } catch (err) {
       this.lastBridgeError = err.message;
@@ -618,7 +646,13 @@ class SecurGymBridgeWorker {
       }).catch(() => {});
     }
 
-    const retries = Math.max(Number(row.retry_count || 0), Number(row.attempts || 0)) + 1;
+    const isUnregistered =
+      lower.includes('pa anrejistre sou whatsapp') ||
+      lower.includes('not registered') ||
+      lower.includes('pas enregistré');
+    const retries = isUnregistered
+      ? 5
+      : Math.max(Number(row.retry_count || 0), Number(row.attempts || 0)) + 1;
     const status = retries >= 5 ? 'failed' : 'pending';
     await this._rest(`whatsapp_messages_outbox?id=eq.${row.id}`, {
       method: 'PATCH',
@@ -627,9 +661,11 @@ class SecurGymBridgeWorker {
         retry_count: retries,
         attempts: retries,
         processed_at: null,
-        error_message: `Echwe sou Liy ${acc.accountIndex} (${errMsg}); ${
-          retries >= 5 ? 'abandone apre 5 tantativ' : 'ap re-eseye otomatikman'
-        }`
+        error_message: isUnregistered
+          ? errMsg
+          : `Echwe sou Liy ${acc.accountIndex} (${errMsg}); ${
+              retries >= 5 ? 'abandone apre 5 tantativ' : 'ap re-eseye otomatikman'
+            }`
       }
     }).catch(() => {});
   }

@@ -159,19 +159,21 @@ router.post('/accounts/:index/initialize', async (req, res) => {
     if (clusterManager.accounts.size >= config.maxConcurrentAccounts) {
       return res.status(409).json({
         ok: false,
-        error: `Sèlman ${config.maxConcurrentAccounts} liy ka aktif an menm tan sou sèvè Cloud 512Mo a pou estabilite. Itilize Liy ${getPrimaryIndex()}.`
+        error: `Maksimòm ${config.maxConcurrentAccounts} liy ka aktif an menm tan sou sèvè Cloud la.`
       });
     }
     try {
-      await clusterManager.registerAndStartAccount(idx, `Liy ${idx}`);
+      const inst = await clusterManager.registerAndStartAccount(idx, `Liy ${idx}`, { userTriggered: true });
+      securGymBridge.attachAccountListeners(inst);
       setTimeout(() => securGymBridge.syncAndHeartbeat(), 500);
-      return res.json({ ok: true, message: `Liy ${idx} ap demare...` });
+      return res.json({ ok: true, message: `Liy ${idx} ap demare sou sèvè Cloud la...` });
     } catch (err) {
       return res.status(500).json({ ok: false, error: err.message });
     }
   }
 
   try {
+    securGymBridge.attachAccountListeners(acc);
     await clusterManager.restartAccount(idx, { awaitInit: false });
     setTimeout(() => securGymBridge.syncAndHeartbeat(), 500);
     return res.json({ ok: true, message: `Liy ${idx} ap rekonekte sou sèvè Cloud la...` });
@@ -184,12 +186,17 @@ router.post('/accounts/:index/initialize', async (req, res) => {
 router.post('/accounts/:index/reset', async (req, res) => {
   const idx = parseInt(req.params.index, 10);
   const acc = clusterManager.getAccount(idx);
-  if (!acc) {
-    return res.status(404).json({ ok: false, error: `Liy ${idx} pa aktif sou sèvè sa a.` });
+  if (!acc && clusterManager.accounts.size >= config.maxConcurrentAccounts) {
+    return res.status(409).json({
+      ok: false,
+      error: `Maksimòm ${config.maxConcurrentAccounts} liy ka aktif an menm tan sou sèvè Cloud la.`
+    });
   }
 
   try {
     await clusterManager.resetAccount(idx, { awaitInit: false });
+    const inst = clusterManager.getAccount(idx);
+    if (inst) securGymBridge.attachAccountListeners(inst);
     setTimeout(() => securGymBridge.syncAndHeartbeat(), 500);
     return res.json({ ok: true, message: `Sesyon Liy ${idx} efase nèt. Nouvo kòd QR ap prepare.` });
   } catch (err) {
