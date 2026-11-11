@@ -5,10 +5,26 @@
 
 window.adminController = {
   activeQrInterval: null,
+  masterTenant: null,
+  masterKeyVisible: false,
+  tenantsList: [],
+  revealedTenantIds: new Set(),
+  lastCreatedTenant: null,
+
+  getAdminHeaders(includeJson = false) {
+    const headers = {};
+    if (includeJson) headers['Content-Type'] = 'application/json';
+    const token = typeof window.getAuthAccessToken === 'function' ? window.getAuthAccessToken() : null;
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+  },
 
   async refreshDashboard() {
     await Promise.all([
       this.fetchOverviewStats(),
+      this.fetchMasterApiKey(),
       this.fetchPendingPlanRequests(),
       this.fetchTenantsList(),
       this.fetchWhatsAppAccounts(),
@@ -21,9 +37,7 @@ window.adminController = {
   async fetchOverviewStats() {
     try {
       const res = await fetch('/api/v1/admin/overview', {
-        headers: {
-          'x-admin-email': currentUser ? currentUser.email : 'laurorejeanclarens0@gmail.com'
-        }
+        headers: this.getAdminHeaders(false)
       });
       const data = await res.json();
       if (data.ok && data.stats) {
@@ -37,10 +51,273 @@ window.adminController = {
     }
   },
 
+  // ---------------- MASTER API KEY & INTÉGRATION EXTERNE ----------------
+  async fetchMasterApiKey() {
+    try {
+      const res = await fetch('/api/v1/admin/master-key', {
+        headers: this.getAdminHeaders(false)
+      });
+      const data = await res.json();
+      if (!data.ok || !data.tenant) return;
+
+      this.masterTenant = data.tenant;
+      const inputEl = document.getElementById('admin-master-api-key');
+      if (inputEl) {
+        inputEl.value = data.tenant.api_key || '';
+        inputEl.type = this.masterKeyVisible ? 'text' : 'password';
+      }
+
+      const baseUrlEl = document.getElementById('admin-base-url');
+      if (baseUrlEl) {
+        baseUrlEl.textContent = data.integration?.base_url || window.getPublicGatewayUrl();
+      }
+
+      const usageEl = document.getElementById('admin-master-usage');
+      if (usageEl && data.usage) {
+        const daily = data.tenant.daily_quota ?? 5000;
+        const monthly = data.tenant.monthly_quota ?? 100000;
+        usageEl.textContent = `Plan ${(data.tenant.plan_tier || 'enterprise').toUpperCase()} · Aujourd'hui : ${data.usage.sent_today || 0} / ${daily} · Ce mois : ${data.usage.sent_this_month || 0} / ${monthly}`;
+      }
+    } catch (e) {
+      console.warn('[Admin Master Key Error]:', e);
+    }
+  },
+
+  toggleMasterKeyVisibility() {
+    this.masterKeyVisible = !this.masterKeyVisible;
+    const inputEl = document.getElementById('admin-master-api-key');
+    const btnEl = document.getElementById('btn-toggle-admin-master-key');
+    if (inputEl) inputEl.type = this.masterKeyVisible ? 'text' : 'password';
+    if (btnEl) {
+      btnEl.innerHTML = this.masterKeyVisible
+        ? `<i data-lucide="eye-off" class="icon-sm"></i> Masquer`
+        : `<i data-lucide="eye" class="icon-sm"></i> Afficher`;
+      refreshLucideIcons();
+    }
+  },
+
+  async copyMasterApiKey() {
+    if (!this.masterTenant?.api_key) return;
+    try {
+      await navigator.clipboard.writeText(this.masterTenant.api_key);
+      const btn = document.getElementById('btn-copy-admin-master-key');
+      if (btn) {
+        btn.innerHTML = `<i data-lucide="check" class="icon-sm"></i> Copié`;
+        refreshLucideIcons();
+        setTimeout(() => {
+          btn.innerHTML = `<i data-lucide="copy" class="icon-sm"></i> Copier`;
+          refreshLucideIcons();
+        }, 2000);
+      }
+    } catch {
+      alert('Impossible de copier automatiquement.');
+    }
+  },
+
+  async copyBaseUrl() {
+    const baseUrlEl = document.getElementById('admin-base-url');
+    const url = baseUrlEl ? baseUrlEl.textContent : window.getPublicGatewayUrl();
+    try {
+      await navigator.clipboard.writeText(url);
+      alert('Base URL copiée : ' + url);
+    } catch {
+      alert(url);
+    }
+  },
+
+  async rotateMasterApiKey() {
+    if (!this.masterTenant?.id) return;
+    if (!confirm('Régénérer la Master Clé API Admin ? L’ancienne clé cessera immédiatement de fonctionner sur les sites qui l’utilisent.')) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/v1/admin/api-keys/${this.masterTenant.id}/rotate`, {
+        method: 'POST',
+        headers: this.getAdminHeaders(true)
+      });
+      const data = await res.json();
+      if (data.ok && data.tenant) {
+        this.masterTenant = data.tenant;
+        this.masterKeyVisible = true;
+        await this.fetchMasterApiKey();
+        await this.fetchTenantsList();
+        alert('Nouvelle Master Clé API générée avec succès !');
+      } else {
+        alert('Erreur: ' + (data.error || 'Rotation impossible'));
+      }
+    } catch (e) {
+      alert('Erreur réseau: ' + e.message);
+    }
+  },
+
+  async copyMasterAiPrompt() {
+    const key = this.masterTenant?.api_key;
+    if (!key) {
+      alert('Chargement de la clé en cours, veuillez réessayer.');
+      return;
+    }
+    const baseUrl = document.getElementById('admin-base-url')?.textContent || window.getPublicGatewayUrl();
+    const prompt = window.buildAiIntegrationPrompt(baseUrl, key);
+    try {
+      await navigator.clipboard.writeText(prompt);
+      const btn = document.getElementById('btn-copy-admin-ai-prompt');
+      if (btn) {
+        btn.innerHTML = `<i data-lucide="check" class="icon-sm"></i> Prompt IA Copié`;
+        refreshLucideIcons();
+        setTimeout(() => {
+          btn.innerHTML = `<i data-lucide="bot" class="icon-sm"></i> Copier Prompt Complet pour IA`;
+          refreshLucideIcons();
+        }, 2200);
+      }
+    } catch {
+      this.openAiPromptModal(this.masterTenant.id);
+    }
+  },
+
+  openCreateApiKeyModal() {
+    const resultBox = document.getElementById('create-apikey-result');
+    const form = document.getElementById('form-create-apikey');
+    if (resultBox) resultBox.style.display = 'none';
+    if (form) form.reset();
+    this.handleCreatePlanChange();
+    openModal('modal-create-apikey');
+  },
+
+  handleCreatePlanChange() {
+    const planEl = document.getElementById('create-key-plan');
+    const dailyEl = document.getElementById('create-key-daily');
+    const monthlyEl = document.getElementById('create-key-monthly');
+    if (!planEl || !dailyEl || !monthlyEl) return;
+
+    const defaults = {
+      starter: { daily: 15, monthly: 300 },
+      pro: { daily: 100, monthly: 3000 },
+      enterprise: { daily: 5000, monthly: 100000 }
+    }[planEl.value] || { daily: 100, monthly: 3000 };
+
+    dailyEl.value = defaults.daily;
+    monthlyEl.value = defaults.monthly;
+  },
+
+  async handleCreateApiKeySubmit(e) {
+    e.preventDefault();
+    const name = document.getElementById('create-key-name').value.trim();
+    const email = document.getElementById('create-key-email').value.trim();
+    const plan_tier = document.getElementById('create-key-plan').value;
+    const daily_quota = parseInt(document.getElementById('create-key-daily').value, 10);
+    const monthly_quota = parseInt(document.getElementById('create-key-monthly').value, 10);
+    const btn = document.getElementById('btn-submit-create-apikey');
+
+    if (!name) return;
+    btn.disabled = true;
+    btn.innerHTML = `<i data-lucide="loader-2" class="spin icon-sm"></i> Génération...`;
+    refreshLucideIcons();
+
+    try {
+      const res = await fetch('/api/v1/admin/api-keys', {
+        method: 'POST',
+        headers: this.getAdminHeaders(true),
+        body: JSON.stringify({
+          name,
+          email: email || null,
+          plan_tier,
+          daily_quota,
+          monthly_quota,
+          is_active: true
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok && data.tenant) {
+        this.lastCreatedTenant = data.tenant;
+        const resultBox = document.getElementById('create-apikey-result');
+        const valueInput = document.getElementById('created-apikey-value');
+        if (valueInput) valueInput.value = data.tenant.api_key;
+        if (resultBox) resultBox.style.display = 'block';
+        await this.fetchTenantsList();
+        await this.fetchOverviewStats();
+      } else {
+        alert('Erreur: ' + (data.error || 'Création impossible'));
+      }
+    } catch (err) {
+      alert('Erreur réseau: ' + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `<i data-lucide="key" class="icon-sm"></i> Générer la Clé API Maintenant`;
+      refreshLucideIcons();
+    }
+  },
+
+  async copyCreatedApiKey() {
+    if (!this.lastCreatedTenant?.api_key) return;
+    await navigator.clipboard.writeText(this.lastCreatedTenant.api_key).catch(() => {});
+    alert('Clé API copiée dans le presse-papiers !');
+  },
+
+  async copyCreatedAiPrompt() {
+    if (!this.lastCreatedTenant?.api_key) return;
+    const baseUrl = document.getElementById('admin-base-url')?.textContent || window.getPublicGatewayUrl();
+    const prompt = window.buildAiIntegrationPrompt(baseUrl, this.lastCreatedTenant.api_key);
+    await navigator.clipboard.writeText(prompt).catch(() => {});
+    alert('Prompt complet pour IA copié !');
+  },
+
+  openAiPromptModal(preselectTenantId = null) {
+    const select = document.getElementById('ai-prompt-key-select');
+    if (!select) return;
+
+    const options = [];
+    if (this.masterTenant) {
+      options.push(this.masterTenant);
+    }
+    for (const t of this.tenantsList) {
+      if (!options.some(o => o.id === t.id)) {
+        options.push(t);
+      }
+    }
+
+    select.innerHTML = options.map(t => {
+      const label = `${window.escapeHtml(t.name)} (${t.is_master_admin ? 'MASTER' : (t.plan_tier || 'starter').toUpperCase()})`;
+      const selected = preselectTenantId && t.id === preselectTenantId ? 'selected' : '';
+      return `<option value="${window.escapeHtml(t.api_key || '')}" ${selected}>${label}</option>`;
+    }).join('');
+
+    this.updateAiPromptPreview();
+    openModal('modal-ai-prompt');
+  },
+
+  updateAiPromptPreview() {
+    const select = document.getElementById('ai-prompt-key-select');
+    const preview = document.getElementById('ai-prompt-preview');
+    if (!select || !preview) return;
+    const baseUrl = document.getElementById('admin-base-url')?.textContent || window.getPublicGatewayUrl();
+    preview.value = window.buildAiIntegrationPrompt(baseUrl, select.value || '<VOTRE_CLE_API>');
+  },
+
+  async copyAiPromptFromModal() {
+    const preview = document.getElementById('ai-prompt-preview');
+    const btn = document.getElementById('btn-copy-ai-prompt-modal');
+    if (!preview) return;
+    try {
+      await navigator.clipboard.writeText(preview.value);
+      if (btn) {
+        btn.innerHTML = `<i data-lucide="check" class="icon-sm"></i> Prompt Copié`;
+        refreshLucideIcons();
+        setTimeout(() => {
+          btn.innerHTML = `<i data-lucide="copy" class="icon-sm"></i> Copier Tout le Prompt`;
+          refreshLucideIcons();
+        }, 2000);
+      }
+    } catch {
+      preview.select();
+      alert('Sélectionnez le texte et copiez-le manuellement.');
+    }
+  },
+
+  // ---------------- DEMANDES CLIENTS ----------------
   async fetchPendingPlanRequests() {
     try {
       const res = await fetch('/api/v1/admin/plan-requests?status=pending', {
-        headers: { 'x-admin-email': currentUser ? currentUser.email : 'laurorejeanclarens0@gmail.com' }
+        headers: this.getAdminHeaders(false)
       });
       const data = await res.json();
       const tbody = document.getElementById('admin-requests-tbody');
@@ -58,18 +335,19 @@ window.adminController = {
           enterprise: '<span class="badge badge-success">Enterprise (Illimité)</span>'
         };
 
-        const planBadge = planBadges[req.requested_plan] || `<span class="badge badge-muted">${req.requested_plan}</span>`;
+        const safePlan = window.escapeHtml(req.requested_plan || 'starter');
+        const planBadge = planBadges[req.requested_plan] || `<span class="badge badge-muted">${safePlan}</span>`;
         const dateStr = new Date(req.created_at).toLocaleDateString('fr-FR');
 
         return `
           <tr>
-            <td><strong>${req.company_name}</strong></td>
-            <td><code>${req.email}</code></td>
+            <td><strong>${window.escapeHtml(req.company_name)}</strong></td>
+            <td><code>${window.escapeHtml(req.email)}</code></td>
             <td>${planBadge}</td>
             <td style="color: var(--text-muted); font-size: 0.8rem;">${dateStr}</td>
             <td>
               <div style="display:flex; gap:8px;">
-                <button class="btn btn-sm btn-success" onclick="window.adminController.approveRequest('${req.id}', '${req.requested_plan}')">
+                <button class="btn btn-sm btn-success" onclick="window.adminController.approveRequest('${req.id}', '${safePlan}')">
                   <i data-lucide="check" class="icon-sm"></i> Valider
                 </button>
                 <button class="btn btn-sm btn-danger" onclick="window.adminController.rejectRequest('${req.id}')">
@@ -90,10 +368,7 @@ window.adminController = {
     try {
       const res = await fetch(`/api/v1/admin/plan-requests/${requestId}/approve`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-email': currentUser ? currentUser.email : 'laurorejeanclarens0@gmail.com'
-        },
+        headers: this.getAdminHeaders(true),
         body: JSON.stringify({ plan_tier: planTier })
       });
       const data = await res.json();
@@ -113,9 +388,7 @@ window.adminController = {
     try {
       const res = await fetch(`/api/v1/admin/plan-requests/${requestId}/reject`, {
         method: 'POST',
-        headers: {
-          'x-admin-email': currentUser ? currentUser.email : 'laurorejeanclarens0@gmail.com'
-        }
+        headers: this.getAdminHeaders(false)
       });
       const data = await res.json();
       if (data.ok) {
@@ -127,76 +400,181 @@ window.adminController = {
     }
   },
 
+  // ---------------- TENANTS & CLÉS API EXTERNES ----------------
   async fetchTenantsList() {
     try {
-      const res = await fetch('/api/v1/admin/tenants', {
-        headers: { 'x-admin-email': currentUser ? currentUser.email : 'laurorejeanclarens0@gmail.com' }
+      const res = await fetch('/api/v1/admin/api-keys', {
+        headers: this.getAdminHeaders(false)
       });
       const data = await res.json();
       const tbody = document.getElementById('admin-tenants-tbody');
       if (!tbody) return;
 
-      if (!data.tenants || data.tenants.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:20px;">Aucun client enregistré.</td></tr>`;
+      this.tenantsList = Array.isArray(data.tenants) ? data.tenants : [];
+
+      if (this.tenantsList.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:20px;">Aucune clé API enregistrée.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = data.tenants.map(t => {
+      tbody.innerHTML = this.tenantsList.map(t => {
         const statusBadge = t.is_active
           ? `<span class="badge badge-success"><i data-lucide="check" class="icon-sm"></i> Actif</span>`
-          : `<span class="badge badge-warning"><i data-lucide="clock" class="icon-sm"></i> En attente</span>`;
+          : `<span class="badge badge-warning"><i data-lucide="clock" class="icon-sm"></i> Désactivé</span>`;
 
-        const maskedKey = t.api_key.substring(0, 10) + '...' + t.api_key.substring(t.api_key.length - 4);
+        const isRevealed = this.revealedTenantIds.has(t.id);
+        const keyStr = String(t.api_key || '');
+        const maskedKey = keyStr.length > 14
+          ? `${keyStr.slice(0, 10)}...${keyStr.slice(-4)}`
+          : keyStr;
+        const displayedKey = isRevealed ? keyStr : maskedKey;
+
+        const usage = t.usage || { sent_today: 0, sent_this_month: 0 };
+        const daily = t.daily_quota ?? 15;
+        const monthly = t.monthly_quota ?? 300;
+        const masterBadge = t.is_master_admin
+          ? `<span class="badge badge-primary" style="margin-left:6px;">MASTER</span>`
+          : '';
 
         return `
           <tr>
-            <td><strong>${t.name}</strong></td>
-            <td><code>${t.email || '-'}</code></td>
-            <td><span class="badge badge-primary">${(t.plan_tier || 'starter').toUpperCase()}</span></td>
-            <td><code title="${t.api_key}">${maskedKey}</code></td>
+            <td><strong>${window.escapeHtml(t.name)}</strong>${masterBadge}</td>
+            <td><code>${window.escapeHtml(t.email || '-')}</code></td>
+            <td>
+              <span class="badge badge-primary">${window.escapeHtml((t.plan_tier || 'starter').toUpperCase())}</span>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">${daily}/j · ${monthly}/mois</div>
+            </td>
+            <td style="font-size:0.82rem;">
+              <div>Jour : <strong>${usage.sent_today || 0}</strong> / ${daily}</div>
+              <div style="color:var(--text-muted);">Mois : ${usage.sent_this_month || 0} / ${monthly}</div>
+            </td>
+            <td>
+              <code style="font-size:0.78rem; word-break:break-all;">${window.escapeHtml(displayedKey)}</code>
+            </td>
             <td>${statusBadge}</td>
             <td>
-              <button class="btn btn-sm btn-secondary" onclick="window.adminController.toggleTenantActive('${t.id}', ${!t.is_active})">
-                <i data-lucide="${t.is_active ? 'slash' : 'check'}" class="icon-sm"></i> ${t.is_active ? 'Désactiver' : 'Activer'}
-              </button>
+              <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button class="btn btn-secondary btn-xs" onclick="window.adminController.toggleTenantKeyVisibility('${t.id}')" title="Afficher/Masquer">
+                  <i data-lucide="${isRevealed ? 'eye-off' : 'eye'}" class="icon-sm"></i>
+                </button>
+                <button class="btn btn-secondary btn-xs" onclick="window.adminController.copyTenantKey('${t.id}')" title="Copier Clé">
+                  <i data-lucide="copy" class="icon-sm"></i>
+                </button>
+                <button class="btn btn-primary btn-xs" onclick="window.adminController.openAiPromptModal('${t.id}')" title="Prompt IA">
+                  <i data-lucide="sparkles" class="icon-sm"></i> IA
+                </button>
+                <button class="btn btn-secondary btn-xs" onclick="window.adminController.rotateTenantKey('${t.id}')" title="Régénérer la Clé">
+                  <i data-lucide="rotate-cw" class="icon-sm"></i>
+                </button>
+                <button class="btn btn-secondary btn-xs" onclick="window.adminController.toggleTenantActive('${t.id}', ${!t.is_active})">
+                  <i data-lucide="${t.is_active ? 'slash' : 'check'}" class="icon-sm"></i> ${t.is_active ? 'Off' : 'On'}
+                </button>
+                ${
+                  t.is_master_admin
+                    ? ''
+                    : `<button class="btn btn-danger btn-xs" onclick="window.adminController.deleteTenant('${t.id}')" title="Supprimer">
+                         <i data-lucide="trash-2" class="icon-sm"></i>
+                       </button>`
+                }
+              </div>
             </td>
           </tr>
         `;
       }).join('');
+      refreshLucideIcons();
     } catch (e) {
       console.warn('[Fetch Tenants Error]:', e);
     }
   },
 
+  toggleTenantKeyVisibility(tenantId) {
+    if (this.revealedTenantIds.has(tenantId)) {
+      this.revealedTenantIds.delete(tenantId);
+    } else {
+      this.revealedTenantIds.add(tenantId);
+    }
+    this.fetchTenantsList();
+  },
+
+  async copyTenantKey(tenantId) {
+    const t = this.tenantsList.find(x => x.id === tenantId);
+    if (!t?.api_key) return;
+    await navigator.clipboard.writeText(t.api_key).catch(() => {});
+    alert(`Clé API copiée pour "${t.name}".`);
+  },
+
+  async rotateTenantKey(tenantId) {
+    const t = this.tenantsList.find(x => x.id === tenantId);
+    if (!confirm(`Régénérer la clé API pour "${t?.name || tenantId}" ? L'ancienne clé deviendra invalide.`)) return;
+    try {
+      const res = await fetch(`/api/v1/admin/api-keys/${tenantId}/rotate`, {
+        method: 'POST',
+        headers: this.getAdminHeaders(true)
+      });
+      const data = await res.json();
+      if (data.ok) {
+        this.revealedTenantIds.add(tenantId);
+        await this.fetchTenantsList();
+        await this.fetchMasterApiKey();
+        alert('Clé API régénérée avec succès !');
+      } else {
+        alert('Erreur: ' + (data.error || 'Rotation échouée'));
+      }
+    } catch (e) {
+      alert('Erreur réseau: ' + e.message);
+    }
+  },
+
   async toggleTenantActive(tenantId, newStatus) {
     try {
-      const res = await fetch(`/api/v1/admin/tenants/${tenantId}/activate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-email': currentUser ? currentUser.email : 'laurorejeanclarens0@gmail.com'
-        },
+      const res = await fetch(`/api/v1/admin/tenants/${tenantId}`, {
+        method: 'PATCH',
+        headers: this.getAdminHeaders(true),
         body: JSON.stringify({ is_active: newStatus })
       });
       const data = await res.json();
       if (data.ok) {
         await this.fetchTenantsList();
-        refreshLucideIcons();
+      } else {
+        alert('Erreur: ' + (data.error || 'Mise à jour impossible'));
       }
     } catch (e) {
       alert('Erreur: ' + e.message);
     }
   },
 
+  async deleteTenant(tenantId) {
+    const t = this.tenantsList.find(x => x.id === tenantId);
+    if (!confirm(`Supprimer définitivement la clé API "${t?.name || tenantId}" ?`)) return;
+    try {
+      const res = await fetch(`/api/v1/admin/tenants/${tenantId}`, {
+        method: 'DELETE',
+        headers: this.getAdminHeaders(false)
+      });
+      const data = await res.json();
+      if (data.ok) {
+        await this.fetchTenantsList();
+        await this.fetchOverviewStats();
+      } else {
+        alert('Erreur: ' + (data.error || 'Suppression refusée'));
+      }
+    } catch (e) {
+      alert('Erreur réseau: ' + e.message);
+    }
+  },
+
+  // ---------------- CLUSTER MULTI-LIGNES WHATSAPP ----------------
   async fetchWhatsAppAccounts() {
     try {
-      const res = await fetch('/api/v1/accounts');
+      const res = await fetch('/api/v1/accounts', {
+        headers: this.getAdminHeaders(false)
+      });
       const data = await res.json();
       const container = document.getElementById('admin-accounts-grid');
       if (!container) return;
 
       if (!data.accounts || data.accounts.length === 0) {
-        container.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding: 40px; color:var(--text-muted);">Aucune ligne WhatsApp configurée. Cliquez sur "Ajouter une Ligne" pour démarrer.</div>`;
+        container.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding: 40px; color:var(--text-muted);">Aucune ligne WhatsApp configurée. Cliquez sur "Ajouter une Ligne SIM" pour démarrer.</div>`;
         return;
       }
 
@@ -212,13 +590,13 @@ window.adminController = {
           statusBadge = '<span class="badge badge-danger"><i data-lucide="alert-triangle" class="icon-sm"></i> ERREUR</span>';
         }
 
-        const phoneDisplay = acc.phone_number ? `+${acc.phone_number}` : 'En attente de connexion';
+        const phoneDisplay = acc.phone_number ? `+${window.escapeHtml(acc.phone_number)}` : 'En attente de connexion';
 
         return `
           <div class="card" style="position:relative;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;">
               <div>
-                <h3 style="font-size:1.1rem; font-weight:700;">${acc.label}</h3>
+                <h3 style="font-size:1.1rem; font-weight:700;">${window.escapeHtml(acc.label)}</h3>
                 <span style="font-size:0.8rem; color:var(--text-muted);">SIM #${acc.account_index}</span>
               </div>
               ${statusBadge}
@@ -271,11 +649,13 @@ window.adminController = {
 
     const checkQr = async () => {
       try {
-        const res = await fetch(`/api/v1/accounts/${accountIndex}/qr`);
+        const res = await fetch(`/api/v1/accounts/${accountIndex}/qr`, {
+          headers: this.getAdminHeaders(false)
+        });
         const data = await res.json();
         if (data.ok) {
           if (data.is_ready) {
-            qrStatus.innerHTML = `<span class="badge badge-success"><i data-lucide="check-circle" class="icon-sm"></i> Cette ligne est déjà connectée (+${data.phone_number})</span>`;
+            qrStatus.innerHTML = `<span class="badge badge-success"><i data-lucide="check-circle" class="icon-sm"></i> Cette ligne est déjà connectée (+${window.escapeHtml(data.phone_number)})</span>`;
             qrImg.style.display = 'none';
             refreshLucideIcons();
             clearInterval(this.activeQrInterval);
@@ -300,7 +680,10 @@ window.adminController = {
   async resetAccountSession(accountIndex) {
     if (!confirm(`Voulez-vous effacer la session de la Ligne #${accountIndex} pour scanner un nouveau numéro ?`)) return;
     try {
-      const res = await fetch(`/api/v1/accounts/${accountIndex}/reset`, { method: 'POST' });
+      const res = await fetch(`/api/v1/accounts/${accountIndex}/reset`, {
+        method: 'POST',
+        headers: this.getAdminHeaders(false)
+      });
       const data = await res.json();
       if (data.ok) {
         alert(`Session réinitialisée. Vous pouvez scanner un nouveau code QR.`);
@@ -320,14 +703,11 @@ window.adminController = {
     try {
       const res = await fetch('/api/v1/admin/accounts/add', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-email': currentUser ? currentUser.email : 'laurorejeanclarens0@gmail.com'
-        },
+        headers: this.getAdminHeaders(true),
         body: JSON.stringify({
           account_index: index,
           label: label || `Ligne SIM ${index}`,
-          daily_reminder_limit: limit || 50
+          daily_reminder_limit: limit || 25
         })
       });
       const data = await res.json();
@@ -347,7 +727,7 @@ window.adminController = {
   async fetchEngineSettings() {
     try {
       const res = await fetch('/api/v1/admin/settings', {
-        headers: { 'x-admin-email': currentUser ? currentUser.email : 'laurorejeanclarens0@gmail.com' }
+        headers: this.getAdminHeaders(false)
       });
       const data = await res.json();
       if (data.ok && data.settings) {
@@ -390,10 +770,7 @@ window.adminController = {
 
       const res = await fetch('/api/v1/admin/settings', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-email': currentUser ? currentUser.email : 'laurorejeanclarens0@gmail.com'
-        },
+        headers: this.getAdminHeaders(true),
         body: JSON.stringify(payload)
       });
       const data = await res.json();
@@ -414,8 +791,8 @@ window.adminController = {
 
   async fetchGlobalOutbox() {
     try {
-      const res = await fetch('/api/v1/messages?limit=30', {
-        headers: { 'x-admin-email': currentUser ? currentUser.email : 'laurorejeanclarens0@gmail.com' }
+      const res = await fetch('/api/v1/admin/messages?limit=30', {
+        headers: this.getAdminHeaders(false)
       });
       const data = await res.json();
       const tbody = document.getElementById('admin-outbox-tbody');
@@ -431,19 +808,20 @@ window.adminController = {
         if (m.status === 'sent') statusBadge = '<span class="badge badge-success"><i data-lucide="check" class="icon-sm"></i> Envoyé</span>';
         else if (m.status === 'processing') statusBadge = '<span class="badge badge-primary"><i data-lucide="loader-2" class="spin icon-sm"></i> En cours</span>';
         else if (m.status === 'failed') statusBadge = '<span class="badge badge-danger"><i data-lucide="alert-triangle" class="icon-sm"></i> Échoué</span>';
+        else if (m.status === 'cancelled') statusBadge = '<span class="badge badge-muted">Annulé</span>';
 
-        const isFast = ['receipt', 'welcome', 'otp', 'test'].includes(m.kind);
+        const isFast = ['receipt', 'welcome', 'otp', 'test', 'manual_direct'].includes(m.kind);
         const laneBadge = isFast
           ? `<span class="badge badge-primary">Fast Lane</span>`
           : `<span class="badge badge-warning">Slow Lane</span>`;
 
         return `
           <tr>
-            <td><code>${m.id.substring(0, 8)}...</code></td>
-            <td><strong>${m.cvisual_tenants?.name || m.tenants?.name || 'Client'}</strong></td>
-            <td><code>${m.to_phone}</code></td>
+            <td><code>${window.escapeHtml(m.id.substring(0, 8))}...</code></td>
+            <td><strong>${window.escapeHtml(m.cvisual_tenants?.name || m.tenants?.name || 'Client')}</strong></td>
+            <td><code>${window.escapeHtml(m.to_phone)}</code></td>
             <td>${laneBadge}</td>
-            <td><span class="badge badge-muted">${m.kind}</span></td>
+            <td><span class="badge badge-muted">${window.escapeHtml(m.kind)}</span></td>
             <td>${statusBadge}</td>
             <td style="font-size:0.8rem; color:var(--text-muted);">${new Date(m.created_at).toLocaleTimeString('fr-FR')}</td>
           </tr>
@@ -466,5 +844,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const formSettings = document.getElementById('form-engine-settings');
   if (formSettings) {
     formSettings.addEventListener('submit', (e) => window.adminController.saveEngineSettings(e));
+  }
+
+  const formCreateKey = document.getElementById('form-create-apikey');
+  if (formCreateKey) {
+    formCreateKey.addEventListener('submit', (e) => window.adminController.handleCreateApiKeySubmit(e));
+  }
+
+  const planSelect = document.getElementById('create-key-plan');
+  if (planSelect) {
+    planSelect.addEventListener('change', () => window.adminController.handleCreatePlanChange());
   }
 });

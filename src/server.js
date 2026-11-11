@@ -12,6 +12,7 @@ import securgymRoutes from './api/securgym_routes.js';
 import { clusterManager } from './whatsapp/cluster_manager.js';
 import { sessionStore } from './whatsapp/session_store.js';
 import { securGymBridge } from './securgym/bridge_worker.js';
+import { buildLlmsTxt } from './docs/api_docs.js';
 
 function getCgroupMemoryMb() {
   const candidates = ['/sys/fs/cgroup/memory.current', '/sys/fs/cgroup/memory/memory.usage_in_bytes'];
@@ -43,7 +44,13 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
-app.use(cors());
+app.use(
+  cors({
+    origin: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-Admin-Key', 'Idempotency-Key']
+  })
+);
 if (!process.env.VERCEL) {
   app.use(morgan('short'));
 }
@@ -91,6 +98,14 @@ app.get('/health', (req, res) => {
     },
     securgymBridge: securGymBridge.getStats()
   });
+});
+
+// Machine-readable AI integration spec at root (/llms.txt)
+app.get('/llms.txt', (req, res) => {
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
+  const host = req.get('host');
+  const baseUrl = host ? `${proto}://${host}`.replace(/\/+$/, '') : config.publicUrl;
+  res.type('text/plain; charset=utf-8').send(buildLlmsTxt(baseUrl));
 });
 
 // Mount CVISUAL SaaS API first, then SecurGYM Cloud Gateway compatibility API

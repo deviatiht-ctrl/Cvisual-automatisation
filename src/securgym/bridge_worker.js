@@ -145,14 +145,17 @@ class SecurGymBridgeWorker {
           }
         }
 
-        // Sync counters onto live AccountInstance
+        // Sync counters & shared Slow-Lane pacing onto live AccountInstance
         const acc = clusterManager.getAccount(this.getAccountIndex());
         if (acc) {
-          acc.sentRemindersToday = slowCount;
-          acc.sentTransactionalToday = fastCount;
-          acc.sentToday = slowCount + fastCount;
+          acc.sentRemindersToday = Math.max(acc.sentRemindersToday || 0, slowCount);
+          acc.sentTransactionalToday = Math.max(acc.sentTransactionalToday || 0, fastCount);
+          acc.sentToday = acc.sentRemindersToday + acc.sentTransactionalToday;
           if (latestSlowAt > (acc.lastReminderSentAt || 0)) {
             acc.lastReminderSentAt = latestSlowAt;
+          }
+          if (this.nextSlowLaneAllowedAt > (acc.nextSlowLaneAllowedAt || 0)) {
+            acc.nextSlowLaneAllowedAt = this.nextSlowLaneAllowedAt;
           }
         }
 
@@ -752,77 +755,72 @@ class SecurGymBridgeWorker {
         this._rolloverUtcDayIfNeeded();
         const now = Date.now();
 
-        if (this.sentRemindersToday >= this.dailyReminderCap) {
+        const acc = clusterManager.getPrimaryReadyAccount();
+        const effectiveSentToday = Math.max(this.sentRemindersToday, acc?.sentRemindersToday || 0);
+        if (effectiveSentToday >= this.dailyReminderCap) {
           nextMs = 60000;
         } else if (now < this.batchPauseUntil || now < this.nextSlowLaneAllowedAt) {
           nextMs = 15000;
-        } else {
-          const acc = clusterManager.getPrimaryReadyAccount();
-          if (acc && !acc.isBusy) {
-            // Respect 15s quiet buffer after any recent Fast Lane send
-            if (acc.lastSentAt && now - acc.lastSentAt < 15000) {
-              nextMs = 15000 - (now - acc.lastSentAt) + 500;
-            } else {
-              const res = await this._rest(
-                'whatsapp_messages_outbox?status=eq.pending&kind=not.in.(receipt,welcome,otp,test,manual_direct)&order=created_at.asc&limit=1'
-              );
-              if (res.ok) {
-                const rows = await res.json();
-                const row = Array.isArray(rows) ? rows[0] : null;
-                if (row) {
-                  const check = await this._validateAndDeduplicateRow(row);
-                  if (!check.skip) {
-                    if (isFastLaneKind(check.effectiveKind)) {
-                      // Reclassified to Fast Lane — Fast Lane tick will send immediately
-                      nextMs = 2000;
-                    } else {
-                      await this._markProcessing(row.id, acc.accountIndex);
-                      try {
-                        console.log(
-                          `[SecurGYM Slow Lane] ⏳ Dispatching ${check.effectiveKind} ${row.id} -> +${check.cleanPhone} (${this.sentRemindersToday + 1}/${this.dailyReminderCap} today)...`
-                        );
-                        await acc.sendMessage({
-                          to: check.cleanPhone,
-                          text: row.message,
-                          pdfBase64: row.pdf_base64,
-                          pdfFileName: row.pdf_file_name,
-                          kind: check.effectiveKind
-                        });
-
-                        this.sentRemindersToday++;
-                        this.lastReminderSentAt = Date.now();
-                        this.consecutiveReminders++;
-
-                        await this._markSentAndRecord(row, acc, check.effectiveKind);
-
-                        const minGap = config.engine.slowLane.minIntervalMs || 600000;
-                        const maxJitter = config.engine.slowLane.maxJitterMs || 360000;
-                        const gap = minGap + Math.floor(Math.random() * maxJitter);
-                        this.nextSlowLaneAllowedAt = Date.now() + gap;
-
-                        const batchThreshold = config.engine.slowLane.batchPauseThreshold || 5;
-                        if (this.consecutiveReminders >= batchThreshold) {
-                          const pauseMs = config.engine.slowLane.batchPauseDurationMs || 600000;
-                          this.batchPauseUntil = Date.now() + pauseMs;
-                          this.consecutiveReminders = 0;
-                          console.log(
-                            `[SecurGYM Slow Lane] 🛑 Batch pause (${Math.round(pauseMs / 60000)}m) after ${batchThreshold} consecutive reminders.`
-                          );
-                        } else {
-                          console.log(
-                            `[SecurGYM Slow Lane] ✅ Sent (${this.sentRemindersToday}/${this.dailyReminderCap}). Next slow-lane reminder in ${Math.round(gap / 60000)} min.`
-                          );
-                        }
-                        nextMs = 15000;
-                      } catch (sendErr) {
-                        console.warn(`[SecurGYM Slow Lane] Failed ${row.id}:`, sendErr.message);
-                        await this._markRetryOrFail(row, acc, sendErr.message);
-                        nextMs = 20000;
-                      }
-                    }
+        } else if (acc && !acc.isBusy) {
+          // Shared SIM Slow-Lane cooldown across BOTH SecurGYM & CVISUAL API
+          if (acc.isSlowLaneCooldownActive(now)) {
+            nextMs = 15000;
+          } else {
+            const res = await this._rest(
+              'whatsapp_messages_outbox?status=eq.pending&kind=not.in.(receipt,welcome,otp,test,manual_direct)&order=created_at.asc&limit=1'
+            );
+            if (res.ok) {
+              const rows = await res.json();
+              const row = Array.isArray(rows) ? rows[0] : null;
+              if (row) {
+                const check = await this._validateAndDeduplicateRow(row);
+                if (!check.skip) {
+                  if (isFastLaneKind(check.effectiveKind)) {
+                    // Reclassified to Fast Lane — Fast Lane tick will send immediately
+                    nextMs = 2000;
                   } else {
-                    nextMs = 1500;
+                    await this._markProcessing(row.id, acc.accountIndex);
+                    try {
+                      console.log(
+                        `[SecurGYM Slow Lane] ⏳ Dispatching ${check.effectiveKind} ${row.id} -> +${check.cleanPhone} (${effectiveSentToday + 1}/${this.dailyReminderCap} today)...`
+                      );
+                      await acc.sendMessage({
+                        to: check.cleanPhone,
+                        text: row.message,
+                        pdfBase64: row.pdf_base64,
+                        pdfFileName: row.pdf_file_name,
+                        kind: check.effectiveKind
+                      });
+
+                      this.sentRemindersToday = Math.max(this.sentRemindersToday + 1, acc.sentRemindersToday || 0);
+                      this.lastReminderSentAt = Date.now();
+                      this.consecutiveReminders = acc.consecutiveRemindersCount || (this.consecutiveReminders + 1);
+
+                      await this._markSentAndRecord(row, acc, check.effectiveKind);
+
+                      const pacing = acc.recordSlowLaneSendOutcome();
+                      this.nextSlowLaneAllowedAt = pacing.nextSlowLaneAllowedAt;
+                      if (pacing.batchPauseTriggered) {
+                        this.batchPauseUntil = pacing.batchPauseUntil;
+                        this.consecutiveReminders = 0;
+                        const pauseMin = Math.round(((config.engine.slowLane.batchPauseDurationMs || 600000) / 60000));
+                        console.log(
+                          `[SecurGYM Slow Lane] 🛑 Batch pause (${pauseMin}m) after batch threshold.`
+                        );
+                      } else {
+                        console.log(
+                          `[SecurGYM Slow Lane] ✅ Sent (${this.sentRemindersToday}/${this.dailyReminderCap}). Next slow-lane reminder in ${Math.round(pacing.gapMs / 60000)} min.`
+                        );
+                      }
+                      nextMs = 15000;
+                    } catch (sendErr) {
+                      console.warn(`[SecurGYM Slow Lane] Failed ${row.id}:`, sendErr.message);
+                      await this._markRetryOrFail(row, acc, sendErr.message);
+                      nextMs = 20000;
+                    }
                   }
+                } else {
+                  nextMs = 1500;
                 }
               }
             }

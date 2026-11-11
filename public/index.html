@@ -193,6 +193,11 @@
               </div>
 
               <div style="margin-top: 10px;">
+                <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: 600;">Empreinte Originale SHA-256 :</span>
+                <div id="sim-orig-hash" class="hash-display">e3b0c44298fc1c14...</div>
+              </div>
+
+              <div style="margin-top: 10px;">
                 <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: 600;">Empreinte Cryptographique Polymorphique SHA-256 :</span>
                 <div id="sim-shield-hash" class="hash-display">6a82fb831e5f8842...</div>
               </div>
@@ -348,8 +353,19 @@
           <span class="section-tag">Intégration Rapide</span>
           <h2 class="section-title">Commencez à Envoyer en 2 Minutes</h2>
           <p class="section-desc">
-            Intégrez notre API dans vos logiciels (Node.js, Python, PHP, Laravel, C#, Postman).
+            Intégrez notre API dans vos logiciels (Node.js, Python, PHP, Laravel, C#, Postman) ou donnez directement la spécification à votre IA.
           </p>
+          <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:16px;">
+            <a href="/api/v1/docs" target="_blank" class="btn btn-primary btn-sm">
+              <i data-lucide="book-open" class="icon-sm"></i> Documentation Interactive
+            </a>
+            <a href="/llms.txt" target="_blank" class="btn btn-secondary btn-sm">
+              <i data-lucide="bot" class="icon-sm"></i> Spécification IA (/llms.txt)
+            </a>
+            <a href="/api/v1/openapi.json" target="_blank" class="btn btn-secondary btn-sm">
+              <i data-lucide="file-json" class="icon-sm"></i> OpenAPI 3.1 JSON
+            </a>
+          </div>
         </div>
 
         <div class="code-wrapper">
@@ -429,14 +445,36 @@
           <span>Votre Clé d'Authentification API (Bearer Token)</span>
         </div>
         <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 16px;">
-          Insérez cette clé secrète dans votre application (CRM, Logiciel de Gestion, Site Web) dans le header <code>Authorization: Bearer &lt;API_KEY&gt;</code>.
+          Insérez cette clé secrète dans votre application (CRM, Logiciel de Gestion, Site Web) dans le header <code>Authorization: Bearer &lt;API_KEY&gt;</code> ou <code>X-API-Key</code>. Ne la exposez jamais côté navigateur client.
         </p>
 
-        <div style="display: flex; gap: 12px; max-width: 650px;">
-          <input type="text" id="client-api-key" readonly value="cv_live_chargement..." style="font-family: monospace;">
-          <button id="btn-copy-api-key" class="btn btn-secondary">
+        <div class="api-key-row">
+          <input type="password" id="client-api-key" class="api-key-input" readonly value="">
+          <button id="btn-toggle-client-key" type="button" class="btn btn-secondary btn-sm" onclick="window.clientController.toggleApiKeyVisibility();">
+            <i data-lucide="eye" class="icon-sm"></i> Afficher
+          </button>
+          <button id="btn-copy-api-key" type="button" class="btn btn-secondary btn-sm">
             <i data-lucide="copy" class="icon-sm"></i> Copier la Clé
           </button>
+          <button id="btn-copy-client-ai-prompt" type="button" class="btn btn-primary btn-sm" onclick="window.clientController.copyAiPrompt();">
+            <i data-lucide="sparkles" class="icon-sm"></i> Copier Prompt Complet pour IA
+          </button>
+        </div>
+
+        <div id="client-usage-summary" class="api-info-banner">
+          <span><i data-lucide="activity" class="icon-sm"></i> Consommation temps réel : chargement...</span>
+        </div>
+
+        <div class="doc-links-bar">
+          <a href="/api/v1/docs" target="_blank" class="btn btn-secondary btn-xs">
+            <i data-lucide="book-open" class="icon-sm"></i> Documentation API
+          </a>
+          <a href="/llms.txt" target="_blank" class="btn btn-secondary btn-xs">
+            <i data-lucide="bot" class="icon-sm"></i> /llms.txt
+          </a>
+          <a href="/api/v1/openapi.json" target="_blank" class="btn btn-secondary btn-xs">
+            <i data-lucide="file-json" class="icon-sm"></i> OpenAPI JSON
+          </a>
         </div>
 
         <div class="code-wrapper" style="margin-top: 18px;">
@@ -509,6 +547,57 @@
         </form>
       </div>
 
+      <!-- Webhooks Temps Réel -->
+      <div id="client-webhooks-card" class="card" style="margin-bottom: 32px;">
+        <div class="card-title">
+          <i data-lucide="webhook" class="icon-md"></i>
+          <span>Webhooks Temps Réel (Notifications HMAC-SHA256)</span>
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 16px;">
+          Recevez automatiquement les événements <code>message.sent</code> et <code>message.failed</code> signés avec l'en-tête <code>X-CVISUAL-Signature</code> sur votre site web.
+        </p>
+
+        <form id="form-client-webhook" style="margin-bottom: 18px;">
+          <div class="grid-2" style="gap: 14px; align-items: end;">
+            <div>
+              <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">URL de Réception HTTPS :</label>
+              <input type="url" id="client-webhook-url" placeholder="https://votre-site.com/api/webhooks/cvisual" required>
+            </div>
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+              <button type="submit" id="btn-register-webhook" class="btn btn-primary">
+                <i data-lucide="plus-circle" class="icon-sm"></i> Ajouter un Webhook
+              </button>
+            </div>
+          </div>
+        </form>
+
+        <div id="client-webhook-secret-banner" style="display:none; margin-bottom:16px;" class="api-info-banner">
+          <div>
+            <strong>Secret HMAC généré (copiez-le maintenant) :</strong>
+            <code id="client-new-webhook-secret" style="margin-left:8px;"></code>
+          </div>
+          <button type="button" class="btn btn-secondary btn-xs" onclick="window.clientController.copyNewWebhookSecret();">
+            <i data-lucide="copy" class="icon-sm"></i> Copier Secret
+          </button>
+        </div>
+
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>URL Webhook</th>
+                <th>Événements</th>
+                <th>Secret</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="client-webhooks-tbody">
+              <tr><td colspan="4" style="text-align:center; color: var(--text-muted); padding: 18px;">Aucun webhook enregistré.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- Historique d'Envoi (Outbox) -->
       <div class="card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
@@ -531,11 +620,12 @@
                 <th>Statut</th>
                 <th>Ligne WhatsApp</th>
                 <th>Date / Heure</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody id="client-outbox-tbody">
               <tr>
-                <td colspan="6" style="text-align:center; color: var(--text-muted); padding: 30px;">
+                <td colspan="7" style="text-align:center; color: var(--text-muted); padding: 30px;">
                   Chargement des messages...
                 </td>
               </tr>
@@ -593,6 +683,71 @@
             <div class="stat-metric-val" id="admin-stat-messages">0</div>
             <div class="stat-metric-sub">Messages Délivrés</div>
           </div>
+        </div>
+      </div>
+
+      <!-- Section: Clé API Principale (Master) & Intégration Externe -->
+      <div id="admin-api-control-card" class="card" style="margin-bottom: 32px; border-left: 4px solid var(--accent-primary);">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
+          <div class="card-title" style="margin-bottom:0;">
+            <i data-lucide="key" class="icon-md" style="color:var(--accent-primary);"></i>
+            <span>Clé API Principale (Master Admin) & Intégration sur d'Autres Sites</span>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="window.adminController.openCreateApiKeyModal();">
+              <i data-lucide="plus-circle" class="icon-sm"></i> Créer Clé API (Nouveau Site)
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="window.adminController.openAiPromptModal();">
+              <i data-lucide="sparkles" class="icon-sm"></i> Prompt Complet pour IA
+            </button>
+          </div>
+        </div>
+
+        <p style="color: var(--text-muted); font-size:0.88rem; margin-bottom:16px;">
+          Utilisez la Master Clé Admin ou générez une clé dédiée par site/application. Donnez ensuite le Prompt IA ou <code>/llms.txt</code> à votre assistant IA pour intégrer automatiquement l'API.
+        </p>
+
+        <div style="margin-bottom: 12px;">
+          <label style="display:block; font-size:0.8rem; font-weight:600; color:var(--text-muted); margin-bottom:6px;">
+            Clé API Principale (Master Admin Bearer Token) :
+          </label>
+          <div class="api-key-row">
+            <input type="password" id="admin-master-api-key" class="api-key-input" readonly value="">
+            <button type="button" id="btn-toggle-admin-master-key" class="btn btn-secondary btn-sm" onclick="window.adminController.toggleMasterKeyVisibility();">
+              <i data-lucide="eye" class="icon-sm"></i> Afficher
+            </button>
+            <button type="button" id="btn-copy-admin-master-key" class="btn btn-secondary btn-sm" onclick="window.adminController.copyMasterApiKey();">
+              <i data-lucide="copy" class="icon-sm"></i> Copier
+            </button>
+            <button type="button" id="btn-rotate-admin-master-key" class="btn btn-danger btn-sm" onclick="window.adminController.rotateMasterApiKey();">
+              <i data-lucide="rotate-cw" class="icon-sm"></i> Régénérer
+            </button>
+            <button type="button" id="btn-copy-admin-ai-prompt" class="btn btn-primary btn-sm" onclick="window.adminController.copyMasterAiPrompt();">
+              <i data-lucide="bot" class="icon-sm"></i> Copier Prompt Complet pour IA
+            </button>
+          </div>
+        </div>
+
+        <div class="api-info-banner">
+          <div>
+            <strong>Base URL API :</strong> <code id="admin-base-url">https://cvisual-whatsapp-gateway.onrender.com</code>
+            <button type="button" class="btn btn-secondary btn-xs" style="margin-left:6px;" onclick="window.adminController.copyBaseUrl();">
+              <i data-lucide="copy" class="icon-sm"></i> Copier URL
+            </button>
+          </div>
+          <div id="admin-master-usage" style="color:var(--text-muted);">Chargement des quotas...</div>
+        </div>
+
+        <div class="doc-links-bar">
+          <a href="/api/v1/docs" target="_blank" class="btn btn-secondary btn-xs">
+            <i data-lucide="book-open" class="icon-sm"></i> Documentation API HTML
+          </a>
+          <a href="/llms.txt" target="_blank" class="btn btn-secondary btn-xs">
+            <i data-lucide="bot" class="icon-sm"></i> Spécification IA (/llms.txt)
+          </a>
+          <a href="/api/v1/openapi.json" target="_blank" class="btn btn-secondary btn-xs">
+            <i data-lucide="file-json" class="icon-sm"></i> OpenAPI 3.1 JSON
+          </a>
         </div>
       </div>
 
@@ -718,27 +873,33 @@
         </form>
       </div>
 
-      <!-- Section: Liste des Clients Enregistrés -->
+      <!-- Section: Liste des Clients Enregistrés & Clés API Externes -->
       <div class="card" style="margin-bottom: 32px;">
-        <div class="card-title">
-          <i data-lucide="building" class="icon-md"></i>
-          <span>Tous les Clients Enregistrés sur la Passerelle</span>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+          <div class="card-title" style="margin-bottom:0;">
+            <i data-lucide="building" class="icon-md"></i>
+            <span>Clients Enregistrés & Clés API pour Sites Externes</span>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" onclick="window.adminController.openCreateApiKeyModal();">
+            <i data-lucide="plus-circle" class="icon-sm"></i> Créer Clé API
+          </button>
         </div>
 
         <div class="table-wrapper">
           <table>
             <thead>
               <tr>
-                <th>Entreprise</th>
+                <th>Site / Entreprise</th>
                 <th>Email</th>
-                <th>Forfait</th>
+                <th>Forfait & Quotas</th>
+                <th>Usage (Jour / Mois)</th>
                 <th>Clé API</th>
                 <th>Statut</th>
-                <th>Action</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody id="admin-tenants-tbody">
-              <tr><td colspan="6" style="text-align:center; padding:20px;">Chargement des clients...</td></tr>
+              <tr><td colspan="7" style="text-align:center; padding:20px;">Chargement des clés API...</td></tr>
             </tbody>
           </table>
         </div>
@@ -913,6 +1074,99 @@
         <button class="btn btn-secondary" style="justify-content:space-between;" onclick="window.clientController.submitPlanUpgrade('enterprise');">
           <span>Enterprise Illimité (Volume sans limite)</span>
           <strong>Contacter</strong>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODALE: CRÉER UNE CLÉ API EXTERNE ================= -->
+  <div id="modal-create-apikey" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 style="font-size: 1.2rem; font-weight: 700;">Créer une Clé API pour un Autre Site</h3>
+        <button class="modal-close" onclick="closeModal('modal-create-apikey');">
+          <i data-lucide="x" class="icon-md"></i>
+        </button>
+      </div>
+
+      <form id="form-create-apikey">
+        <div style="margin-bottom:12px;">
+          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Nom du Site / Application :</label>
+          <input type="text" id="create-key-name" placeholder="Ex: Boutique Shopify Haïti" required>
+        </div>
+        <div style="margin-bottom:12px;">
+          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Email Associé (Optionnel) :</label>
+          <input type="email" id="create-key-email" placeholder="dev@monsite.com">
+        </div>
+        <div style="margin-bottom:12px;">
+          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Forfait :</label>
+          <select id="create-key-plan">
+            <option value="starter">Starter (15 / jour · 300 / mois)</option>
+            <option value="pro" selected>Pro Business (100 / jour · 3 000 / mois)</option>
+            <option value="enterprise">Enterprise (5 000 / jour · 100 000 / mois)</option>
+          </select>
+        </div>
+        <div class="grid-2" style="gap:12px; margin-bottom:18px;">
+          <div>
+            <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Quota Journalier :</label>
+            <input type="number" id="create-key-daily" value="100" min="1" max="50000" required>
+          </div>
+          <div>
+            <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Quota Mensuel :</label>
+            <input type="number" id="create-key-monthly" value="3000" min="1" max="1000000" required>
+          </div>
+        </div>
+        <button type="submit" id="btn-submit-create-apikey" class="btn btn-primary" style="width:100%;">
+          <i data-lucide="key" class="icon-sm"></i> Générer la Clé API Maintenant
+        </button>
+      </form>
+
+      <div id="create-apikey-result" style="display:none; margin-top:18px; padding-top:16px; border-top:1px solid var(--border-color);">
+        <p style="font-size:0.86rem; font-weight:700; color:var(--accent-success); margin-bottom:8px;">
+          Clé API générée et activée avec succès :
+        </p>
+        <input type="text" id="created-apikey-value" readonly style="font-family:monospace; margin-bottom:10px; background:var(--bg-secondary);">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.adminController.copyCreatedApiKey();">
+            <i data-lucide="copy" class="icon-sm"></i> Copier Clé
+          </button>
+          <button type="button" class="btn btn-primary btn-sm" onclick="window.adminController.copyCreatedAiPrompt();">
+            <i data-lucide="sparkles" class="icon-sm"></i> Copier Prompt Complet pour IA
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODALE: PROMPT COMPLET POUR IA ================= -->
+  <div id="modal-ai-prompt" class="modal-overlay">
+    <div class="modal-box modal-lg">
+      <div class="modal-header">
+        <h3 style="font-size: 1.2rem; font-weight: 700;">Prompt Complet d'Intégration pour Assistant IA</h3>
+        <button class="modal-close" onclick="closeModal('modal-ai-prompt');">
+          <i data-lucide="x" class="icon-md"></i>
+        </button>
+      </div>
+
+      <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 14px;">
+        Sélectionnez la clé API à inclure dans le prompt puis copiez ce bloc directement dans ChatGPT, Claude, Cursor, Antigravity ou Gemini sur votre autre site web.
+      </p>
+
+      <div style="margin-bottom: 12px;">
+        <label style="display:block; font-size:0.82rem; font-weight:600; color:var(--text-muted); margin-bottom:6px;">
+          Clé API sélectionnée :
+        </label>
+        <select id="ai-prompt-key-select" onchange="window.adminController.updateAiPromptPreview();"></select>
+      </div>
+
+      <textarea id="ai-prompt-preview" class="prompt-textarea" rows="14" readonly></textarea>
+
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:14px; flex-wrap:wrap;">
+        <a href="/llms.txt" target="_blank" class="btn btn-secondary btn-sm">
+          <i data-lucide="external-link" class="icon-sm"></i> Ouvrir /llms.txt
+        </a>
+        <button type="button" id="btn-copy-ai-prompt-modal" class="btn btn-primary btn-sm" onclick="window.adminController.copyAiPromptFromModal();">
+          <i data-lucide="copy" class="icon-sm"></i> Copier Tout le Prompt
         </button>
       </div>
     </div>

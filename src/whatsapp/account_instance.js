@@ -130,13 +130,16 @@ export class WhatsAppAccountInstance extends EventEmitter {
     this._reconnectTimer = null;
     this._saveCreds = null;
 
-    // Pacing & daily counters (synced with CVISUAL DB & SecurGYM bridge)
+    // Pacing & daily counters (synced seamlessly with CVISUAL DB, ClusterManager & SecurGYM bridge)
+    this._countersUtcDay = new Date().toISOString().slice(0, 10);
     this.sentToday = 0;
     this.sentRemindersToday = 0;
     this.sentTransactionalToday = 0;
     this.consecutiveRemindersCount = 0;
     this.lastSentAt = 0;
     this.lastReminderSentAt = 0;
+    this.nextSlowLaneAllowedAt = 0;
+    this.slowLaneBatchPauseUntil = 0;
     this.restrictedUntil = null;
     this.restrictionReason = null;
 
@@ -171,6 +174,107 @@ export class WhatsAppAccountInstance extends EventEmitter {
       Boolean(this.phoneNumber) &&
       !this.checkRestricted()
     );
+  }
+
+  _rolloverCountersIfNewUtcDay() {
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    if (this._countersUtcDay !== todayUtc) {
+      this._countersUtcDay = todayUtc;
+      this.sentToday = 0;
+      this.sentRemindersToday = 0;
+      this.sentTransactionalToday = 0;
+      this.consecutiveRemindersCount = 0;
+      this.slowLaneBatchPauseUntil = 0;
+    }
+  }
+
+  isSlowLaneCooldownActive(now = Date.now()) {
+    this._rolloverCountersIfNewUtcDay();
+    if (this.slowLaneBatchPauseUntil && now < this.slowLaneBatchPauseUntil) return true;
+    if (this.nextSlowLaneAllowedAt && now < this.nextSlowLaneAllowedAt) return true;
+    if (this.lastSentAt && now - this.lastSentAt < 15000) return true;
+    return false;
+  }
+
+  recordSlowLaneSendOutcome() {
+    this._rolloverCountersIfNewUtcDay();
+    const now = Date.now();
+    const minIntervalMs = config.engine.slowLane.minIntervalMs || 600000;
+    const maxJitterMs = config.engine.slowLane.maxJitterMs || 360000;
+    const gapMs = minIntervalMs + Math.floor(Math.random() * maxJitterMs);
+    this.nextSlowLaneAllowedAt = now + gapMs;
+
+    const batchThreshold = config.engine.slowLane.batchPauseThreshold || 5;
+    let batchPauseTriggered = false;
+    if (this.consecutiveRemindersCount >= batchThreshold) {
+      const pauseMs = config.engine.slowLane.batchPauseDurationMs || 600000;
+      this.slowLaneBatchPauseUntil = now + pauseMs;
+      this.consecutiveRemindersCount = 0;
+      batchPauseTriggered = true;
+      db.resetConsecutiveReminders(this.accountIndex).catch(() => {});
+    }
+
+    return {
+      gapMs,
+      nextSlowLaneAllowedAt: this.nextSlowLaneAllowedAt,
+      batchPauseUntil: this.slowLaneBatchPauseUntil,
+      batchPauseTriggered
+    };
+  }
+
+  async checkNumbersOnWhatsApp(phones = []) {
+    if (!this.isReady() || !this.sock) {
+      throw new Error(`Liy WhatsApp ${this.accountIndex} pa konekte pou kounye a.`);
+    }
+
+    const rawList = Array.isArray(phones) ? phones : [phones];
+    const items = [];
+    const seen = new Set();
+
+    for (const raw of rawList.slice(0, 50)) {
+      const clean = normalizePhoneDigits(raw, config.securgym?.defaultCountryCode || '509');
+      if (clean && clean.length >= 8 && !seen.has(clean)) {
+        seen.add(clean);
+        items.push({ input: String(raw), phone: clean });
+      } else if (!clean || clean.length < 8) {
+        items.push({ input: String(raw), phone: clean || null, invalid: true });
+      }
+    }
+
+    const validPhones = items.filter(i => !i.invalid).map(i => i.phone);
+    const lookupMap = new Map();
+
+    if (validPhones.length > 0) {
+      for (let i = 0; i < validPhones.length; i += 20) {
+        const chunk = validPhones.slice(i, i + 20);
+        const res = await this.sock.onWhatsApp(...chunk);
+        if (Array.isArray(res)) {
+          for (const entry of res) {
+            const jidDigits = String(entry?.jid || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+            if (jidDigits) {
+              lookupMap.set(jidDigits, {
+                exists: Boolean(entry?.exists),
+                jid: entry?.jid || `${jidDigits}@s.whatsapp.net`
+              });
+            }
+          }
+        }
+      }
+    }
+
+    return items.map(it => {
+      if (it.invalid) {
+        return { input: it.input, phone: it.phone, valid_format: false, exists: false, jid: null };
+      }
+      const match = lookupMap.get(it.phone);
+      return {
+        input: it.input,
+        phone: it.phone,
+        valid_format: true,
+        exists: Boolean(match?.exists),
+        jid: match?.exists ? match.jid : null
+      };
+    });
   }
 
   _rememberContact(c) {
@@ -796,6 +900,7 @@ export class WhatsAppAccountInstance extends EventEmitter {
         }
       }
 
+      this._rolloverCountersIfNewUtcDay();
       const now = Date.now();
       this.lastSentAt = now;
       this.sentToday += 1;

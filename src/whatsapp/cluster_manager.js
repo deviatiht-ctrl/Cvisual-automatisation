@@ -1,8 +1,54 @@
+import crypto from 'crypto';
 import path from 'path';
 import { WhatsAppAccountInstance, normalizePhoneDigits } from './account_instance.js';
 import { sessionStore } from './session_store.js';
 import { db } from '../database.js';
 import { config } from '../config.js';
+
+export function signWebhookPayload(secret, timestamp, rawBody) {
+  return crypto
+    .createHmac('sha256', String(secret))
+    .update(`${timestamp}.${rawBody}`)
+    .digest('hex');
+}
+
+export async function deliverWebhook(webhook, eventName, data = {}, timeoutMs = 8000) {
+  if (!webhook?.url) {
+    return { ok: false, status: 0, error: 'Missing webhook URL' };
+  }
+
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const payload = {
+    id: 'evt_' + crypto.randomBytes(12).toString('hex'),
+    event: eventName,
+    timestamp: new Date().toISOString(),
+    data
+  };
+  const rawBody = JSON.stringify(payload);
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'CVISUAL-WhatsApp-Webhook/1.0',
+    'X-CVISUAL-Event': eventName,
+    'X-CVISUAL-Timestamp': timestamp
+  };
+
+  if (webhook.secret) {
+    headers['X-CVISUAL-Signature'] = `sha256=${signWebhookPayload(webhook.secret, timestamp, rawBody)}`;
+  }
+
+  try {
+    const res = await fetch(webhook.url, {
+      method: 'POST',
+      headers,
+      body: rawBody,
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    return { ok: res.ok, status: res.status };
+  } catch (err) {
+    return { ok: false, status: 0, error: err?.message || String(err) };
+  }
+}
 
 export class ClusterManager {
   constructor() {
@@ -11,8 +57,25 @@ export class ClusterManager {
     this.isSlowLaneRunning = false;
     this.fastLaneTimeout = null;
     this.slowLaneTimeout = null;
-    this.batchPauseMap = new Map(); // accountIndex -> timestamp when pause expires
-    this.nextSlowLaneAllowedAt = new Map(); // accountIndex -> timestamp
+  }
+
+  async dispatchWebhooks(tenantId, eventName, data) {
+    if (!tenantId) return;
+    try {
+      const webhooks = await db.listWebhooks(tenantId);
+      if (!Array.isArray(webhooks) || webhooks.length === 0) return;
+
+      for (const wh of webhooks) {
+        const subscribed = Array.isArray(wh.events) && wh.events.length > 0 ? wh.events : ['*'];
+        if (subscribed.includes('*') || subscribed.includes(eventName)) {
+          deliverWebhook(wh, eventName, data).catch(err => {
+            console.warn(`[Webhook] Delivery failed to ${wh.url}:`, err?.message || err);
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[Webhook Dispatch Warning]:', err?.message || err);
+    }
   }
 
   async initializeCluster() {
@@ -176,24 +239,48 @@ export class ClusterManager {
   }
 
   /**
-   * Direct immediate dispatch for Fast Lane HTTP endpoints (/api/send, /api/test)
+   * Direct immediate dispatch for Fast Lane HTTP endpoints (/api/send, /api/test, /api/v1/messages/send mode=sync)
    */
-  async sendMessageAnywhere({ to, message, pdfBase64 = null, pdfFileName = null, kind = 'test' }) {
+  async sendMessageAnywhere({
+    to,
+    message,
+    pdfBase64 = null,
+    pdfFileName = null,
+    kind = 'test',
+    preferredAccountIndex = null
+  }) {
     const cleanPhone = normalizePhoneDigits(to, config.securgym?.defaultCountryCode || '509');
     if (!cleanPhone || cleanPhone.length < 8) {
       throw new Error('Numéro destinataire invalide (minimum 8 chiffres).');
     }
 
+    const prefIdx = preferredAccountIndex ? parseInt(preferredAccountIndex, 10) : null;
+    if (prefIdx !== null) {
+      const target = this.getAccount(prefIdx);
+      if (!target || !target.isReady()) {
+        throw new Error(`Liy WhatsApp #${prefIdx} pa konekte oswa pa prè pou kounye a.`);
+      }
+    }
+
     let chosen = null;
     for (let attempt = 0; attempt < 16; attempt++) {
-      const readyAccounts = this.getAllAccounts().filter(a => a.isReady() && !a.isBusy);
-      if (readyAccounts.length > 0) {
-        readyAccounts.sort((a, b) => (a.lastSentAt || 0) - (b.lastSentAt || 0));
-        chosen = readyAccounts[0];
-        break;
+      if (prefIdx !== null) {
+        const target = this.getAccount(prefIdx);
+        if (target && target.isReady() && !target.isBusy) {
+          chosen = target;
+          break;
+        }
+        if (!target || !target.isReady()) break;
+      } else {
+        const readyAccounts = this.getAllAccounts().filter(a => a.isReady() && !a.isBusy);
+        if (readyAccounts.length > 0) {
+          readyAccounts.sort((a, b) => (a.lastSentAt || 0) - (b.lastSentAt || 0));
+          chosen = readyAccounts[0];
+          break;
+        }
+        const anyReady = this.getAllAccounts().some(a => a.isReady());
+        if (!anyReady) break;
       }
-      const anyReady = this.getAllAccounts().some(a => a.isReady());
-      if (!anyReady) break;
       await new Promise(r => setTimeout(r, 500));
     }
 
@@ -217,10 +304,12 @@ export class ClusterManager {
     };
   }
 
-  async selectFastLaneAccount() {
+  async selectFastLaneAccount(preferredAccountIndex = null) {
+    const prefIdx = preferredAccountIndex ? parseInt(preferredAccountIndex, 10) : null;
     const readyAccounts = [];
 
     for (const [idx, inst] of this.accounts.entries()) {
+      if (prefIdx !== null && idx !== prefIdx) continue;
       if (inst.isReady() && !inst.isBusy) {
         const dbAcc = await db.getAccountByIndex(idx);
         const lastMem = inst.lastSentAt || 0;
@@ -239,11 +328,13 @@ export class ClusterManager {
     return readyAccounts[0].instance;
   }
 
-  async selectSlowLaneAccount() {
+  async selectSlowLaneAccount(preferredAccountIndex = null) {
+    const prefIdx = preferredAccountIndex ? parseInt(preferredAccountIndex, 10) : null;
     const now = Date.now();
     const eligibleAccounts = [];
 
     for (const [idx, inst] of this.accounts.entries()) {
+      if (prefIdx !== null && idx !== prefIdx) continue;
       if (!inst.isReady() || inst.isBusy) continue;
 
       const dbAcc = await db.getAccountByIndex(idx);
@@ -253,13 +344,7 @@ export class ClusterManager {
         continue;
       }
 
-      const pausedUntil = this.batchPauseMap.get(idx) || 0;
-      const nextAllowed = this.nextSlowLaneAllowedAt.get(idx) || 0;
-      if (now < pausedUntil || now < nextAllowed) {
-        continue;
-      }
-
-      if (inst.lastSentAt && now - inst.lastSentAt < 15000) {
+      if (inst.isSlowLaneCooldownActive(now)) {
         continue;
       }
 
@@ -294,7 +379,7 @@ export class ClusterManager {
     try {
       const msg = await db.fetchNextPendingFastLane();
       if (msg) {
-        const account = await this.selectFastLaneAccount();
+        const account = await this.selectFastLaneAccount(msg.assigned_account_index || null);
         if (account) {
           await db.updateMessageStatus(msg.id, 'processing', {
             assignedAccountIndex: account.accountIndex
@@ -307,7 +392,7 @@ export class ClusterManager {
           await new Promise(r => setTimeout(r, delayMs));
 
           try {
-            await account.sendMessage({
+            const sendResult = await account.sendMessage({
               to: msg.to_phone,
               text: msg.message,
               pdfBase64: msg.pdf_base64,
@@ -315,16 +400,43 @@ export class ClusterManager {
               kind: msg.kind
             });
 
+            const sentAt = new Date().toISOString();
             await db.updateMessageStatus(msg.id, 'sent', {
+              assignedAccountIndex: account.accountIndex,
               sentByPhone: account.phoneNumber,
-              sentAt: new Date().toISOString(),
+              sentAt,
               errorMessage: null
             });
 
             console.log(`[Fast Lane] Sent message ${msg.id} to ${msg.to_phone} via Line ${account.accountIndex}`);
+            await this.dispatchWebhooks(msg.tenant_id, 'message.sent', {
+              message_id: msg.id,
+              tenant_id: msg.tenant_id,
+              to_phone: msg.to_phone,
+              kind: msg.kind,
+              lane: 'fast_lane',
+              account_index: account.accountIndex,
+              sent_by_phone: account.phoneNumber || null,
+              whatsapp_message_id: sendResult?.whatsappMessageId || null,
+              sent_at: sentAt
+            });
           } catch (sendErr) {
-            console.error(`[Fast Lane] Failed sending ${msg.id}:`, sendErr.message);
-            await db.incrementMessageRetryOrFail(msg.id, sendErr.message, 5);
+            const errMsg = sendErr?.message || String(sendErr);
+            console.error(`[Fast Lane] Failed sending ${msg.id}:`, errMsg);
+            const isPermanent =
+              errMsg.includes('pa anrejistre sou WhatsApp') || errMsg.includes('pa valid');
+            const outcome = await db.incrementMessageRetryOrFail(msg.id, errMsg, 5, isPermanent);
+            if (outcome?.status === 'failed') {
+              await this.dispatchWebhooks(msg.tenant_id, 'message.failed', {
+                message_id: msg.id,
+                tenant_id: msg.tenant_id,
+                to_phone: msg.to_phone,
+                kind: msg.kind,
+                lane: 'fast_lane',
+                retry_count: outcome.retryCount,
+                error_message: errMsg
+              });
+            }
           }
         }
       }
@@ -345,9 +457,9 @@ export class ClusterManager {
     try {
       const msg = await db.fetchNextPendingSlowLane();
       if (msg) {
-        const eligible = await this.selectSlowLaneAccount();
+        const eligible = await this.selectSlowLaneAccount(msg.assigned_account_index || null);
         if (eligible) {
-          const { instance, dbRecord } = eligible;
+          const { instance } = eligible;
           const accountIndex = instance.accountIndex;
 
           await db.updateMessageStatus(msg.id, 'processing', {
@@ -356,33 +468,58 @@ export class ClusterManager {
 
           try {
             console.log(`[Slow Lane] Processing message ${msg.id} (${msg.kind}) via Line ${accountIndex}...`);
-            await instance.sendMessage({
+            const sendResult = await instance.sendMessage({
               to: msg.to_phone,
               text: msg.message,
+              pdfBase64: msg.pdf_base64,
+              pdfFileName: msg.pdf_file_name,
               kind: msg.kind
             });
 
+            const sentAt = new Date().toISOString();
             await db.updateMessageStatus(msg.id, 'sent', {
+              assignedAccountIndex: accountIndex,
               sentByPhone: instance.phoneNumber,
-              sentAt: new Date().toISOString(),
+              sentAt,
               errorMessage: null
             });
 
-            const newConsecutive = (dbRecord.consecutive_reminders_count || 0) + 1;
-            if (newConsecutive >= config.engine.slowLane.batchPauseThreshold) {
-              const pauseUntil = Date.now() + config.engine.slowLane.batchPauseDurationMs;
-              this.batchPauseMap.set(accountIndex, pauseUntil);
-              await db.resetConsecutiveReminders(accountIndex);
-              console.log(`[Slow Lane] Line ${accountIndex} hit batch pause threshold. Cooling down 10 min.`);
+            const pacing = instance.recordSlowLaneSendOutcome();
+            if (pacing.batchPauseTriggered) {
+              console.log(`[Slow Lane] Line ${accountIndex} hit batch pause threshold. Cooling down.`);
             }
 
-            const jitter = Math.floor(Math.random() * config.engine.slowLane.maxJitterMs);
-            nextIntervalMs = config.engine.slowLane.minIntervalMs + jitter;
-            this.nextSlowLaneAllowedAt.set(accountIndex, Date.now() + nextIntervalMs);
-            console.log(`[Slow Lane] Next message allowed in ${Math.round(nextIntervalMs / 60000)} minutes.`);
+            nextIntervalMs = Math.max(15000, pacing.gapMs);
+            console.log(`[Slow Lane] Next message allowed in ${Math.round(pacing.gapMs / 60000)} minutes.`);
+
+            await this.dispatchWebhooks(msg.tenant_id, 'message.sent', {
+              message_id: msg.id,
+              tenant_id: msg.tenant_id,
+              to_phone: msg.to_phone,
+              kind: msg.kind,
+              lane: 'slow_lane',
+              account_index: accountIndex,
+              sent_by_phone: instance.phoneNumber || null,
+              whatsapp_message_id: sendResult?.whatsappMessageId || null,
+              sent_at: sentAt
+            });
           } catch (sendErr) {
-            console.error(`[Slow Lane] Failed sending ${msg.id}:`, sendErr.message);
-            await db.incrementMessageRetryOrFail(msg.id, sendErr.message, 5);
+            const errMsg = sendErr?.message || String(sendErr);
+            console.error(`[Slow Lane] Failed sending ${msg.id}:`, errMsg);
+            const isPermanent =
+              errMsg.includes('pa anrejistre sou WhatsApp') || errMsg.includes('pa valid');
+            const outcome = await db.incrementMessageRetryOrFail(msg.id, errMsg, 5, isPermanent);
+            if (outcome?.status === 'failed') {
+              await this.dispatchWebhooks(msg.tenant_id, 'message.failed', {
+                message_id: msg.id,
+                tenant_id: msg.tenant_id,
+                to_phone: msg.to_phone,
+                kind: msg.kind,
+                lane: 'slow_lane',
+                retry_count: outcome.retryCount,
+                error_message: errMsg
+              });
+            }
             nextIntervalMs = 20000;
           }
         } else {

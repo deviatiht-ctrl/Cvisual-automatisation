@@ -816,6 +816,67 @@ tr:hover td {
   object-fit: contain;
 }
 
+/* ================= API KEY & INTEGRATION PANELS ================= */
+.api-key-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.api-key-input {
+  flex: 1;
+  min-width: 240px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.86rem;
+  background: var(--bg-secondary);
+}
+
+.btn-xs {
+  padding: 4px 9px;
+  font-size: 0.76rem;
+  border-radius: var(--radius-sm);
+  gap: 4px;
+}
+
+.modal-box.modal-lg {
+  max-width: 780px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.prompt-textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  background: #0f172a;
+  color: #f8fafc;
+  border-color: #1e293b;
+  resize: vertical;
+}
+
+.api-info-banner {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.84rem;
+}
+
+.doc-links-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+
 /* ================= RESPONSIVE ================= */
 @media (max-width: 900px) {
   .hero-title { font-size: 2.3rem; }

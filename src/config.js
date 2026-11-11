@@ -20,6 +20,16 @@ export const config = {
     .map(email => email.trim().toLowerCase())
     .filter(Boolean),
 
+  // Optional static Admin API secret (never hardcoded; set ADMIN_API_SECRET on Render if needed)
+  adminApiSecret: process.env.ADMIN_API_SECRET || '',
+
+  // Canonical public base URL for docs/OpenAPI examples
+  publicUrl: (
+    process.env.PUBLIC_URL ||
+    process.env.RENDER_EXTERNAL_URL ||
+    'https://cvisual-whatsapp-gateway.onrender.com'
+  ).replace(/\/+$/, ''),
+
   // Storage and WhatsApp Multi-Device Session Directory
   authDataDir: process.env.AUTH_DATA_DIR || path.resolve(process.cwd(), '.wwebjs_auth'),
 
