@@ -156,6 +156,8 @@ class SessionStore {
         '--exclude=GrShaderCache',
         '--exclude=GraphiteDawnCache',
         '--exclude=CacheStorage',
+        '--exclude=ScriptCache',
+        '--exclude=blob_storage',
         '--exclude=Crashpad',
         '--exclude=BrowserMetrics*',
         '--exclude=SingletonLock',

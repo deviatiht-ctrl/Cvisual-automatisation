@@ -4,12 +4,28 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import apiRoutes from './api/routes.js';
 import securgymRoutes from './api/securgym_routes.js';
 import { clusterManager } from './whatsapp/cluster_manager.js';
 import { securGymBridge } from './securgym/bridge_worker.js';
+
+function getCgroupMemoryMb() {
+  const candidates = ['/sys/fs/cgroup/memory.current', '/sys/fs/cgroup/memory/memory.usage_in_bytes'];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        const bytes = parseInt(fs.readFileSync(p, 'utf8').trim(), 10);
+        if (Number.isFinite(bytes) && bytes > 0) {
+          return Math.round(bytes / (1024 * 1024));
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -60,7 +76,8 @@ app.get('/health', (req, res) => {
     memoryMb: {
       rss: Math.round(mem.rss / (1024 * 1024)),
       heapUsed: Math.round(mem.heapUsed / (1024 * 1024)),
-      heapTotal: Math.round(mem.heapTotal / (1024 * 1024))
+      heapTotal: Math.round(mem.heapTotal / (1024 * 1024)),
+      containerTotal: getCgroupMemoryMb()
     },
     whatsapp: {
       maxConcurrentAccounts: config.maxConcurrentAccounts,

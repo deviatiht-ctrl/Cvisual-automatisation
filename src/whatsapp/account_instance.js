@@ -213,15 +213,25 @@ export class WhatsAppAccountInstance extends EventEmitter {
         '--disable-gpu',
         '--disable-software-rasterizer',
         '--disable-blink-features=AutomationControlled',
+        '--blink-settings=imagesEnabled=false',
         '--hide-scrollbars',
         '--mute-audio',
         '--disable-extensions',
         '--disable-background-networking',
         '--disable-default-apps',
         '--disable-sync',
+        '--disable-component-update',
+        '--disable-domain-reliability',
+        '--disable-client-side-phishing-detection',
+        '--disable-hang-monitor',
+        '--disable-popup-blocking',
+        '--disable-prompt-on-repost',
+        '--no-pings',
+        '--disk-cache-size=1',
+        '--media-cache-size=1',
         '--renderer-process-limit=1',
         '--disable-breakpad',
-        '--disable-features=Translate,OptimizationHints,MediaRouter,site-per-process',
+        '--disable-features=Translate,OptimizationHints,MediaRouter,site-per-process,IsolateOrigins,AudioServiceOutOfProcess,BackForwardCache,PaintHolding',
         '--js-flags=--max-old-space-size=128'
       ];
 
@@ -234,6 +244,10 @@ export class WhatsAppAccountInstance extends EventEmitter {
       if (config.puppeteer.executablePath) {
         puppeteerOptions.executablePath = config.puppeteer.executablePath;
       }
+
+      console.log(
+        `[Account ${this.accountIndex}] Lancement Chromium (${puppeteerOptions.executablePath || 'bundled'}, mem-cap)...`
+      );
 
       this.client = new Client({
         authStrategy: new LocalAuth({
@@ -293,10 +307,12 @@ export class WhatsAppAccountInstance extends EventEmitter {
       this.updateStatus('AUTHENTICATED', { qr_code_data_url: null });
       this.emit('authenticated', { accountIndex: this.accountIndex });
 
-      // Persist session backup shortly after authentication stabilizes
+      // Persist session backup after initial sync settles (avoids tar RAM spike during sync)
       setTimeout(() => {
-        sessionStore.backup(this.accountIndex, this.sessionPath).catch(() => {});
-      }, 15000);
+        if (!this.isDestroyed && this.status !== 'DISCONNECTED') {
+          sessionStore.backup(this.accountIndex, this.sessionPath).catch(() => {});
+        }
+      }, 35000);
     });
 
     this.client.on('auth_failure', async (msg) => {
@@ -332,7 +348,11 @@ export class WhatsAppAccountInstance extends EventEmitter {
         );
 
         this.startBackupSchedule();
-        sessionStore.backup(this.accountIndex, this.sessionPath).catch(() => {});
+        setTimeout(() => {
+          if (this.isReady()) {
+            sessionStore.backup(this.accountIndex, this.sessionPath).catch(() => {});
+          }
+        }, 12000);
         this.emit('ready', { accountIndex: this.accountIndex, phoneNumber: this.phoneNumber, pushName: this.pushName });
         return true;
       };
