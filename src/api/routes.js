@@ -17,7 +17,7 @@ const router = express.Router();
  */
 router.post('/messages/send', authenticateApiKey, async (req, res) => {
   try {
-    const { to, message, kind = 'receipt', pdf_base64, pdf_file_name } = req.body;
+    const { to, message, kind = 'receipt', pdf_base64, pdfBase64, pdf_file_name, pdfFileName } = req.body;
 
     if (!to || !message) {
       return res.status(400).json({
@@ -35,17 +35,28 @@ router.post('/messages/send', authenticateApiKey, async (req, res) => {
       });
     }
 
-    const validKinds = ['receipt', 'welcome', 'otp', 'test', 'reminder', 'marketing'];
+    const validKinds = [
+      'receipt',
+      'welcome',
+      'otp',
+      'test',
+      'manual_direct',
+      'reminder',
+      'reminder_7d',
+      'reminder_2d',
+      'marketing',
+      'manual'
+    ];
     const messageKind = validKinds.includes(kind) ? kind : 'receipt';
-    const isFastLane = ['receipt', 'welcome', 'otp', 'test'].includes(messageKind);
+    const isFastLane = ['receipt', 'welcome', 'otp', 'test', 'manual_direct'].includes(messageKind);
 
     // Save message to Outbox queue
     const outboxMessage = await db.enqueueMessage({
       tenantId: req.tenant.id,
       toPhone: cleanedTo,
       message,
-      pdfBase64: pdf_base64 || null,
-      pdfFileName: pdf_file_name || null,
+      pdfBase64: pdf_base64 || pdfBase64 || null,
+      pdfFileName: pdf_file_name || pdfFileName || null,
       kind: messageKind
     });
 
@@ -191,7 +202,7 @@ router.get('/accounts/:index/qr', async (req, res) => {
 router.post('/accounts/:index/reset', async (req, res) => {
   try {
     const index = parseInt(req.params.index, 10);
-    const result = await clusterManager.resetAccount(index);
+    const result = await clusterManager.resetAccount(index, { awaitInit: false });
     res.json(result);
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -236,8 +247,11 @@ router.post('/shield/preview', (req, res) => {
       return res.status(400).json({ ok: false, error: 'Text parameter is required.' });
     }
 
-    const isReminder = ['reminder', 'marketing'].includes(kind);
-    const result = applySpintaxAndHashShield(text, { forceEngagement: isReminder });
+    const isReminder = ['reminder', 'reminder_7d', 'reminder_2d', 'marketing', 'manual'].includes(kind);
+    const result = applySpintaxAndHashShield(text, {
+      forceEngagement: isReminder,
+      applyDoNotReply: isReminder
+    });
 
     res.json({
       ok: true,
@@ -616,7 +630,7 @@ router.post('/admin/accounts/add', requireAdmin, async (req, res) => {
       account: {
         account_index: idx,
         label: lineLabel,
-        status: instance.status
+        status: instance.status || 'STANDBY'
       }
     });
   } catch (err) {

@@ -18,7 +18,7 @@ export function parseSpintax(text) {
   if (!text) return '';
   const spintaxRegex = /\{([^{}]+)\}/g;
 
-  let current = text;
+  let current = String(text);
   while (spintaxRegex.test(current)) {
     current = current.replace(spintaxRegex, (match, choices) => {
       const options = choices.split('|');
@@ -30,50 +30,58 @@ export function parseSpintax(text) {
 }
 
 /**
- * Replaces any "Do Not Reply" / "Ne pas répondre" patterns with
- * "Pour confirmer la réception, répondez simplement OK".
- * This triggers organic client engagement, causing Meta's algorithms to classify the SIM as high trust.
+ * Replaces "Do Not Reply" / "Ne pas répondre" / "Pa reponn" patterns with
+ * an organic engagement prompt ("répondez simplement OK").
+ * Meta's anti-spam models reward replies, raising SIM trust score.
  */
 export function replaceDoNotReply(text, forceEngagement = false) {
   if (!text) return '';
   const noReplyPatterns = [
-    /ne\s+(pas\s+)?r[eé]pondez\s+pas/gi,
-    /ne\s+pas\s+r[eé]pondre/gi,
-    /do\s+not\s+reply/gi,
-    /no\s+reply/gi,
-    /pa\s+reponn/gi
+    /\*?ne\s+(?:pas\s+)?r[eé]pondez\s+(?:pas\s+)?(?:[àa]\s+ce\s+(?:num[eé]ro|message))?\*?\.?/gi,
+    /\*?ne\s+pas\s+r[eé]pondre[^.\n]*\*?\.?/gi,
+    /\*?do\s+not\s+reply[^.\n]*\*?\.?/gi,
+    /\*?no\s+reply[^.\n]*\*?\.?/gi,
+    /\*?pa\s+reponn[^.\n]*\*?\.?/gi
   ];
 
-  let modified = text;
+  let modified = String(text);
   let replaced = false;
 
   for (const pattern of noReplyPatterns) {
     if (pattern.test(modified)) {
-      modified = modified.replace(pattern, 'Pour confirmer la réception, répondez simplement OK');
+      modified = modified.replace(
+        pattern,
+        '💡 Pour confirmer la bonne réception, répondez simplement "OK" à ce message.'
+      );
       replaced = true;
     }
   }
 
-  // If forceEngagement is true and string doesn't already contain OK prompt
-  if (forceEngagement && !replaced && !modified.toLowerCase().includes('répondez simplement ok')) {
-    modified += '\n\nPour confirmer la réception, répondez simplement OK.';
+  if (
+    forceEngagement &&
+    !replaced &&
+    !modified.toLowerCase().includes('répondez simplement') &&
+    !modified.toLowerCase().includes('repondez simplement')
+  ) {
+    modified += '\n\n💡 Pour confirmer la bonne réception, répondez simplement "OK".';
   }
 
   return modified;
 }
 
 /**
- * Injects randomized zero-width invisible characters between words.
- * Gives each message an entirely unique SHA-256 fingerprint while looking identical to humans.
+ * Injects randomized zero-width invisible characters between plain prose words
+ * (NEVER corrupting URLs or links) so every message gets a unique SHA-256 hash.
  */
 export function injectZeroWidthHash(text) {
-  if (!text) return '';
-  const words = text.split(' ');
+  if (!text) return { shieldedText: '', injectedCount: 0 };
+  const words = String(text).split(' ');
   let injectedCount = 0;
 
+  const isUrlToken = (w) => /https?:\/\/|wa\.me\/|www\./i.test(w);
+
   const resultWords = words.map((word, index) => {
-    // Randomly inject 1 to 3 zero-width characters in between words
-    if (index < words.length - 1 && Math.random() > 0.15) {
+    if (index < words.length - 1 && word.length > 0 && !isUrlToken(word) && Math.random() > 0.15) {
       const numChars = 1 + Math.floor(Math.random() * 3);
       let stealthSeq = '';
       for (let i = 0; i < numChars; i++) {
@@ -86,13 +94,16 @@ export function injectZeroWidthHash(text) {
     return word;
   });
 
-  // Also append a unique stealth salt at the very end of message
+  // Append an invisible stealth salt only if trailing token isn't a bare URL
+  const lastWord = resultWords[resultWords.length - 1] || '';
   const endSalt = Array.from({ length: 4 })
     .map(() => ZERO_WIDTH_CHARS[Math.floor(Math.random() * ZERO_WIDTH_CHARS.length)])
     .join('');
 
+  const suffix = isUrlToken(lastWord) ? ` ${endSalt}` : endSalt;
+
   return {
-    shieldedText: resultWords.join(' ') + endSalt,
+    shieldedText: resultWords.join(' ') + suffix,
     injectedCount: injectedCount + 4
   };
 }
@@ -105,11 +116,10 @@ export function computeSha256(text) {
 }
 
 /**
- * Calculates human typing simulation duration in milliseconds (between 2000ms and 4000ms)
+ * Calculates human typing simulation duration in milliseconds (2000ms - 4000ms)
  */
 export function calculateHumanTypingDuration(text, minMs = 2000, maxMs = 4000) {
   const base = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
-  // If text is longer, add a slight organic variance
   const lengthFactor = Math.min(1000, Math.floor((text?.length || 0) * 8));
   return Math.min(maxMs + 1000, base + lengthFactor);
 }
@@ -118,23 +128,23 @@ export function calculateHumanTypingDuration(text, minMs = 2000, maxMs = 4000) {
  * MASTER SHIELD PIPELINE
  * Applies:
  * 1. Spintax resolution
- * 2. Meta Trust CTA ("Pour confirmer la réception, répondez simplement OK")
- * 3. Zero-Width Unicode Hash Shield
- * 
- * Returns both the original and transformed text, along with cryptographic hashes for verification.
+ * 2. Optional Meta Trust CTA ("Pour confirmer la réception, répondez simplement OK")
+ * 3. Zero-Width Unicode Hash Shield (URL-safe)
  */
 export function applySpintaxAndHashShield(rawText, options = {}) {
-  const { forceEngagement = false } = options;
+  const { forceEngagement = false, applyDoNotReply = forceEngagement } = options;
 
   const originalHash = computeSha256(rawText);
 
   // 1. Spintax parsing
   const spintaxParsed = parseSpintax(rawText);
 
-  // 2. Anti-Spam Engagement CTA
-  const engagementText = replaceDoNotReply(spintaxParsed, forceEngagement);
+  // 2. Anti-Spam Engagement CTA (applied on Slow Lane / reminders / marketing)
+  const engagementText = (applyDoNotReply || forceEngagement)
+    ? replaceDoNotReply(spintaxParsed, forceEngagement)
+    : spintaxParsed;
 
-  // 3. Invisible Zero-Width Polymorphic Hash Injection
+  // 3. Invisible Zero-Width Polymorphic Hash Injection (safe around URLs)
   const { shieldedText, injectedCount } = injectZeroWidthHash(engagementText);
   const shieldedHash = computeSha256(shieldedText);
 

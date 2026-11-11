@@ -1,4 +1,4 @@
-import { WhatsAppAccountInstance } from './account_instance.js';
+import { WhatsAppAccountInstance, cleanupTmpChromeDirs, normalizePhoneDigits } from './account_instance.js';
 import { db } from '../database.js';
 import { config } from '../config.js';
 
@@ -10,31 +10,64 @@ export class ClusterManager {
     this.fastLaneTimeout = null;
     this.slowLaneTimeout = null;
     this.batchPauseMap = new Map(); // accountIndex -> timestamp when pause expires
+    this.nextSlowLaneAllowedAt = new Map(); // accountIndex -> timestamp
   }
 
   async initializeCluster() {
-    console.log('[Cluster Manager] Initializing WhatsApp Accounts Cluster...');
+    console.log(
+      `[Cluster Manager] Initializing WhatsApp Cluster (maxConcurrentAccounts=${config.maxConcurrentAccounts})...`
+    );
+    cleanupTmpChromeDirs();
+
     let dbAccounts = await db.listAccounts();
 
     if (!dbAccounts || dbAccounts.length === 0) {
-      // Seed account 1
       await db.createOrUpdateAccount({
         account_index: 1,
         label: 'Liy Prensipal 1',
-        daily_reminder_limit: config.engine.slowLane.dailyReminderLimit
+        daily_reminder_limit: config.engine.slowLane.dailyReminderLimit,
+        is_enabled: true
       });
       dbAccounts = await db.listAccounts();
     }
 
-    // On startup, start primary line 1 after a short delay so HTTP server binds and passes health check immediately
-    setTimeout(async () => {
-      const primaryAccount = dbAccounts.find(a => a.account_index === 1) || dbAccounts[0];
-      if (primaryAccount && primaryAccount.is_enabled) {
-        await this.registerAndStartAccount(primaryAccount.account_index, primaryAccount.label);
-      }
-    }, 4000);
+    const enabled = (dbAccounts || [])
+      .filter(a => a.is_enabled !== false)
+      .sort((a, b) => a.account_index - b.account_index);
 
-    // Start dual-lane background processors
+    const primary = enabled.find(a => a.account_index === (config.securgym?.accountIndex || 1)) || enabled[0] || {
+      account_index: config.securgym?.accountIndex || 1,
+      label: 'Liy Prensipal 1'
+    };
+
+    const toStart = [primary];
+    for (const acc of enabled) {
+      if (toStart.length >= config.maxConcurrentAccounts) break;
+      if (acc.account_index !== primary.account_index) {
+        toStart.push(acc);
+      }
+    }
+
+    // Register managed instances synchronously so status/reset routes never miss them at startup
+    const registered = [];
+    for (const acc of toStart) {
+      const idx = parseInt(acc.account_index, 10);
+      if (!this.accounts.has(idx) && this.accounts.size < config.maxConcurrentAccounts) {
+        registered.push(new WhatsAppAccountInstance(idx, acc.label || `Liy ${idx}`));
+        this.accounts.set(idx, registered[registered.length - 1]);
+      }
+    }
+
+    // Launch headless Chromium slightly after HTTP server finishes binding
+    setTimeout(() => {
+      for (const instance of registered) {
+        instance.initialize().catch(err => {
+          console.error(`[Cluster Manager] Error during initialization of Account ${instance.accountIndex}:`, err.message);
+        });
+      }
+    }, 1500);
+
+    // Start CVISUAL multi-tenant dual-lane background processors
     this.startDualLaneEngines();
   }
 
@@ -44,10 +77,16 @@ export class ClusterManager {
       return this.accounts.get(idx);
     }
 
+    if (this.accounts.size >= config.maxConcurrentAccounts) {
+      console.warn(
+        `[Cluster Manager] Blocked spawning Account ${idx}: maxConcurrentAccounts (${config.maxConcurrentAccounts}) limit active to prevent OOM.`
+      );
+      return null;
+    }
+
     const instance = new WhatsAppAccountInstance(idx, label);
     this.accounts.set(idx, instance);
 
-    // Asynchronously initialize without blocking entire server startup
     instance.initialize().catch(err => {
       console.error(`[Cluster Manager] Error during initialization of Account ${idx}:`, err.message);
     });
@@ -55,18 +94,21 @@ export class ClusterManager {
     return instance;
   }
 
+  // Strictly NO lazy Chromium spawning here (avoids accidental OOM on GET QR/status polls)
   getAccount(accountIndex) {
     const idx = parseInt(accountIndex, 10);
-    if (this.accounts.has(idx)) {
-      return this.accounts.get(idx);
-    }
-    // Lazy on-demand start
-    this.registerAndStartAccount(idx, `SIM Liy ${idx}`).catch(() => {});
     return this.accounts.get(idx) || null;
   }
 
   getAllAccounts() {
-    return Array.from(this.accounts.values());
+    return Array.from(this.accounts.values()).sort((a, b) => a.accountIndex - b.accountIndex);
+  }
+
+  getPrimaryReadyAccount() {
+    const ready = this.getAllAccounts().filter(a => a.isReady());
+    if (ready.length === 0) return null;
+    ready.sort((a, b) => (a.lastSentAt || 0) - (b.lastSentAt || 0));
+    return ready[0];
   }
 
   async addAccount(accountIndex, label = `SIM ${accountIndex}`) {
@@ -77,16 +119,88 @@ export class ClusterManager {
       daily_reminder_limit: config.engine.slowLane.dailyReminderLimit,
       is_enabled: true
     });
-    return this.registerAndStartAccount(idx, label);
+    const inst = await this.registerAndStartAccount(idx, label);
+    if (!inst) {
+      return { status: 'QUEUED_STANDBY', account_index: idx, label };
+    }
+    return inst;
   }
 
-  async resetAccount(accountIndex) {
-    const instance = this.getAccount(accountIndex);
-    if (!instance) {
-      throw new Error(`Account ${accountIndex} not found in active cluster.`);
+  async restartAccount(accountIndex, { awaitInit = true } = {}) {
+    const idx = parseInt(accountIndex, 10);
+    let instance = this.getAccount(idx);
+    if (!instance && this.accounts.size < config.maxConcurrentAccounts) {
+      instance = await this.registerAndStartAccount(idx, `SIM Liy ${idx}`);
+      return { ok: true, message: `Account ${idx} initializing.` };
     }
-    await instance.resetSession();
-    return { ok: true, message: `Account ${accountIndex} session reset successfully.` };
+    if (!instance) {
+      throw new Error(`Account ${idx} is not running in this worker (maxConcurrentAccounts=${config.maxConcurrentAccounts}).`);
+    }
+    await instance.restart({ awaitInit });
+    return { ok: true, message: `Account ${idx} restarted successfully.` };
+  }
+
+  async resetAccount(accountIndex, { awaitInit = true } = {}) {
+    const idx = parseInt(accountIndex, 10);
+    const instance = this.getAccount(idx);
+    if (!instance) {
+      throw new Error(`Account ${idx} not found in active cluster.`);
+    }
+    await instance.resetSession({ awaitInit });
+    return { ok: true, message: `Account ${idx} session reset successfully.` };
+  }
+
+  async unrestrictAccount(accountIndex) {
+    const idx = parseInt(accountIndex, 10);
+    const instance = this.getAccount(idx);
+    if (!instance) {
+      throw new Error(`Account ${idx} not found in active cluster.`);
+    }
+    await instance.unrestrict();
+    return { ok: true, message: `Account ${idx} unrestricted.` };
+  }
+
+  /**
+   * Direct immediate dispatch for Fast Lane HTTP endpoints (/api/send, /api/test)
+   */
+  async sendMessageAnywhere({ to, message, pdfBase64 = null, pdfFileName = null, kind = 'test' }) {
+    const cleanPhone = normalizePhoneDigits(to, config.securgym?.defaultCountryCode || '509');
+    if (!cleanPhone || cleanPhone.length < 8) {
+      throw new Error('Numéro destinataire invalide (minimum 8 chiffres).');
+    }
+
+    // Wait briefly up to 8s if a ready line is temporarily busy finishing an ongoing send
+    let chosen = null;
+    for (let attempt = 0; attempt < 16; attempt++) {
+      const readyAccounts = this.getAllAccounts().filter(a => a.isReady() && !a.isBusy);
+      if (readyAccounts.length > 0) {
+        readyAccounts.sort((a, b) => (a.lastSentAt || 0) - (b.lastSentAt || 0));
+        chosen = readyAccounts[0];
+        break;
+      }
+      const anyReady = this.getAllAccounts().some(a => a.isReady());
+      if (!anyReady) break;
+      await new Promise(r => setTimeout(r, 500));
+    }
+
+    if (!chosen) {
+      throw new Error('Okenn liy WhatsApp pa pare oswa konekte pou voye mesaj kounye a.');
+    }
+
+    const result = await chosen.sendMessage({
+      to: cleanPhone,
+      text: String(message || '').trim(),
+      pdfBase64,
+      pdfFileName,
+      kind
+    });
+
+    return {
+      ...result,
+      to: cleanPhone,
+      accountIndex: chosen.accountIndex,
+      fromPhone: chosen.phoneNumber
+    };
   }
 
   /**
@@ -97,19 +211,20 @@ export class ClusterManager {
     const readyAccounts = [];
 
     for (const [idx, inst] of this.accounts.entries()) {
-      if (inst.isReady()) {
+      if (inst.isReady() && !inst.isBusy) {
         const dbAcc = await db.getAccountByIndex(idx);
+        const lastMem = inst.lastSentAt || 0;
+        const lastDb = dbAcc?.last_sent_at ? new Date(dbAcc.last_sent_at).getTime() : 0;
         readyAccounts.push({
           instance: inst,
           dbRecord: dbAcc,
-          lastSentAt: dbAcc?.last_sent_at ? new Date(dbAcc.last_sent_at).getTime() : 0
+          lastSentAt: Math.max(lastMem, lastDb)
         });
       }
     }
 
     if (readyAccounts.length === 0) return null;
 
-    // Pick Least Recently Used (oldest last_sent_at)
     readyAccounts.sort((a, b) => a.lastSentAt - b.lastSentAt);
     return readyAccounts[0].instance;
   }
@@ -119,63 +234,58 @@ export class ClusterManager {
    * Strictly enforces:
    * 1. Max 25 reminders/day/SIM
    * 2. Batch pause (10 min after every 5 reminders)
-   * 3. LRU distribution across all remaining eligible SIMs
+   * 3. 10-16 min interval since last reminder
    */
   async selectSlowLaneAccount() {
     const now = Date.now();
     const eligibleAccounts = [];
 
     for (const [idx, inst] of this.accounts.entries()) {
-      if (!inst.isReady()) continue;
+      if (!inst.isReady() || inst.isBusy) continue;
 
       const dbAcc = await db.getAccountByIndex(idx);
-      if (!dbAcc) continue;
-
-      // Rule 1: Check daily reminder cap
-      const sentToday = dbAcc.sent_reminders_today || 0;
-      const limit = dbAcc.daily_reminder_limit || config.engine.slowLane.dailyReminderLimit;
+      const sentToday = Math.max(dbAcc?.sent_reminders_today || 0, inst.sentRemindersToday || 0);
+      const limit = dbAcc?.daily_reminder_limit || config.engine.slowLane.dailyReminderLimit;
       if (sentToday >= limit) {
-        // Daily cap hit! Skip this line for reminders (line still available for transactional!)
         continue;
       }
 
-      // Rule 2: Check batch pause
       const pausedUntil = this.batchPauseMap.get(idx) || 0;
-      if (now < pausedUntil) {
-        // Line currently cooling down in batch pause
+      const nextAllowed = this.nextSlowLaneAllowedAt.get(idx) || 0;
+      if (now < pausedUntil || now < nextAllowed) {
+        continue;
+      }
+
+      // Leave small buffer after Fast Lane activity so reminder doesn't burst immediately after receipt
+      if (inst.lastSentAt && now - inst.lastSentAt < 15000) {
         continue;
       }
 
       eligibleAccounts.push({
         instance: inst,
-        dbRecord: dbAcc,
-        lastReminderSentAt: dbAcc.last_reminder_sent_at ? new Date(dbAcc.last_reminder_sent_at).getTime() : 0
+        dbRecord: dbAcc || {},
+        lastReminderSentAt: Math.max(
+          dbAcc?.last_reminder_sent_at ? new Date(dbAcc.last_reminder_sent_at).getTime() : 0,
+          inst.lastReminderSentAt || 0
+        )
       });
     }
 
     if (eligibleAccounts.length === 0) return null;
 
-    // Pick Least Recently Used reminder line
     eligibleAccounts.sort((a, b) => a.lastReminderSentAt - b.lastReminderSentAt);
     return eligibleAccounts[0];
   }
 
-  /**
-   * Starts Dual-Lane Scheduling Engine
-   */
   startDualLaneEngines() {
     this.isFastLaneRunning = true;
     this.isSlowLaneRunning = true;
 
-    console.log('[Dual-Lane Engine] Starting Fast Lane & Slow Lane schedulers...');
+    console.log('[Dual-Lane Engine] Starting CVISUAL Fast Lane & Slow Lane schedulers...');
     this.processFastLaneLoop();
     this.processSlowLaneLoop();
   }
 
-  /**
-   * Fast Lane: Immediate dispatch for receipts, welcome, OTP, tests
-   * High priority, never blocked by slow lane pauses
-   */
   async processFastLaneLoop() {
     if (!this.isFastLaneRunning) return;
 
@@ -184,20 +294,18 @@ export class ClusterManager {
       if (msg) {
         const account = await this.selectFastLaneAccount();
         if (account) {
-          // Lock message as processing
           await db.updateMessageStatus(msg.id, 'processing', {
             assignedAccountIndex: account.accountIndex
           });
 
-          // Organic pacing jitter (3 to 10 seconds)
-          const delayMs = Math.floor(
-            Math.random() * (config.engine.fastLane.maxDelayMs - config.engine.fastLane.minDelayMs + 1)
-          ) + config.engine.fastLane.minDelayMs;
+          const delayMs =
+            Math.floor(Math.random() * (config.engine.fastLane.maxDelayMs - config.engine.fastLane.minDelayMs + 1)) +
+            config.engine.fastLane.minDelayMs;
 
           await new Promise(r => setTimeout(r, delayMs));
 
           try {
-            const sendRes = await account.sendMessage({
+            await account.sendMessage({
               to: msg.to_phone,
               text: msg.message,
               pdfBase64: msg.pdf_base64,
@@ -207,15 +315,14 @@ export class ClusterManager {
 
             await db.updateMessageStatus(msg.id, 'sent', {
               sentByPhone: account.phoneNumber,
-              sentAt: new Date().toISOString()
+              sentAt: new Date().toISOString(),
+              errorMessage: null
             });
 
             console.log(`[Fast Lane] Sent message ${msg.id} to ${msg.to_phone} via Line ${account.accountIndex}`);
           } catch (sendErr) {
             console.error(`[Fast Lane] Failed sending ${msg.id}:`, sendErr.message);
-            await db.updateMessageStatus(msg.id, 'failed', {
-              errorMessage: sendErr.message
-            });
+            await db.incrementMessageRetryOrFail(msg.id, sendErr.message, 5);
           }
         }
       }
@@ -223,20 +330,15 @@ export class ClusterManager {
       console.error('[Fast Lane Loop Error]:', loopErr.message);
     }
 
-    // Fast lane checks every 1.5s for instant pickup
-    this.fastLaneTimeout = setTimeout(() => this.processFastLaneLoop(), 1500);
+    if (this.isFastLaneRunning) {
+      this.fastLaneTimeout = setTimeout(() => this.processFastLaneLoop(), 2000);
+    }
   }
 
-  /**
-   * Slow Lane: Paced dispatch for reminders and marketing
-   * 10 - 16 minutes pacing between messages
-   * Max 25 messages per SIM per day
-   * 10 minutes batch pause every 5 consecutive messages
-   */
   async processSlowLaneLoop() {
     if (!this.isSlowLaneRunning) return;
 
-    let nextIntervalMs = config.engine.slowLane.minIntervalMs;
+    let nextIntervalMs = 15000;
 
     try {
       const msg = await db.fetchNextPendingSlowLane();
@@ -251,7 +353,7 @@ export class ClusterManager {
           });
 
           try {
-            console.log(`[Slow Lane] Processing reminder ${msg.id} via Line ${accountIndex}...`);
+            console.log(`[Slow Lane] Processing message ${msg.id} (${msg.kind}) via Line ${accountIndex}...`);
             await instance.sendMessage({
               to: msg.to_phone,
               text: msg.message,
@@ -260,45 +362,41 @@ export class ClusterManager {
 
             await db.updateMessageStatus(msg.id, 'sent', {
               sentByPhone: instance.phoneNumber,
-              sentAt: new Date().toISOString()
+              sentAt: new Date().toISOString(),
+              errorMessage: null
             });
 
-            console.log(`[Slow Lane] Successfully delivered reminder ${msg.id}`);
-
-            // Rule 3: Check consecutive count for 10-minute batch pause
             const newConsecutive = (dbRecord.consecutive_reminders_count || 0) + 1;
             if (newConsecutive >= config.engine.slowLane.batchPauseThreshold) {
               const pauseUntil = Date.now() + config.engine.slowLane.batchPauseDurationMs;
               this.batchPauseMap.set(accountIndex, pauseUntil);
               await db.resetConsecutiveReminders(accountIndex);
-              console.log(`[Slow Lane] Line ${accountIndex} hit 5 consecutive reminders. Cooling down in 10-minute pause.`);
+              console.log(`[Slow Lane] Line ${accountIndex} hit batch pause threshold. Cooling down 10 min.`);
             }
 
-            // Calculate next pacing delay: 10 to 16 minutes
             const jitter = Math.floor(Math.random() * config.engine.slowLane.maxJitterMs);
             nextIntervalMs = config.engine.slowLane.minIntervalMs + jitter;
-            console.log(`[Slow Lane] Next reminder scheduled in ${Math.round(nextIntervalMs / 60000)} minutes.`);
+            this.nextSlowLaneAllowedAt.set(accountIndex, Date.now() + nextIntervalMs);
+            console.log(`[Slow Lane] Next message allowed in ${Math.round(nextIntervalMs / 60000)} minutes.`);
           } catch (sendErr) {
-            console.error(`[Slow Lane] Failed sending reminder ${msg.id}:`, sendErr.message);
-            await db.updateMessageStatus(msg.id, 'failed', {
-              errorMessage: sendErr.message
-            });
-            nextIntervalMs = 15000; // Retry next pending in 15s
+            console.error(`[Slow Lane] Failed sending ${msg.id}:`, sendErr.message);
+            await db.incrementMessageRetryOrFail(msg.id, sendErr.message, 5);
+            nextIntervalMs = 20000;
           }
         } else {
-          // No SIM ready or all reached daily cap / in batch pause
-          nextIntervalMs = 30000; // Check again in 30s
+          nextIntervalMs = 30000;
         }
       } else {
-        // No slow lane messages in outbox
-        nextIntervalMs = 5000;
+        nextIntervalMs = 10000;
       }
     } catch (err) {
       console.error('[Slow Lane Loop Error]:', err.message);
-      nextIntervalMs = 10000;
+      nextIntervalMs = 15000;
     }
 
-    this.slowLaneTimeout = setTimeout(() => this.processSlowLaneLoop(), nextIntervalMs);
+    if (this.isSlowLaneRunning) {
+      this.slowLaneTimeout = setTimeout(() => this.processSlowLaneLoop(), nextIntervalMs);
+    }
   }
 
   stop() {
@@ -306,6 +404,10 @@ export class ClusterManager {
     this.isSlowLaneRunning = false;
     if (this.fastLaneTimeout) clearTimeout(this.fastLaneTimeout);
     if (this.slowLaneTimeout) clearTimeout(this.slowLaneTimeout);
+    for (const acc of this.accounts.values()) {
+      acc.isDestroyed = true;
+      acc.stopBackupSchedule();
+    }
   }
 }
 

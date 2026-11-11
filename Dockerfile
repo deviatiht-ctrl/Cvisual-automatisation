@@ -1,13 +1,16 @@
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 # Prevent interactive prompts during apt install
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV NODE_OPTIONS="--max-old-space-size=160"
 
-# Install Chromium, fonts, and core graphic dependencies required by Puppeteer
+# Install Chromium, archive tools (tar/gzip for session persistence), fonts, and core deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
+    tar \
+    gzip \
     fonts-ipafont-gothic \
     fonts-wqy-zenhei \
     fonts-thai-tlwg \
@@ -51,7 +54,7 @@ WORKDIR /app
 
 # Copy package manifests first for caching layers
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm install --omit=dev && npm cache clean --force
 
 # Copy source code and frontend assets
 COPY . .

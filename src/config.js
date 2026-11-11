@@ -1,12 +1,8 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 
 dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // Helper to find existing Chromium binary on the host
 function resolveDefaultChromiumPath() {
@@ -39,8 +35,8 @@ function resolveDefaultChromiumPath() {
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'production',
-  
-  // Supabase Database & Auth
+
+  // Supabase Database & Auth (CVISUAL SaaS Control Plane + Session Backup Storage)
   supabase: {
     url: process.env.SUPABASE_URL || '',
     key: process.env.SUPABASE_KEY || '',
@@ -56,6 +52,26 @@ export const config = {
   // Storage and WhatsApp Session Directory
   authDataDir: process.env.AUTH_DATA_DIR || path.resolve(process.cwd(), '.wwebjs_auth'),
 
+  // Strict concurrency cap to respect 512Mi free-tier Render container memory
+  maxConcurrentAccounts: Math.max(1, parseInt(process.env.MAX_CONCURRENT_ACCOUNTS || '1', 10)),
+
+  // Cloud Session Backup in Supabase Storage (survives ephemeral container restarts)
+  sessionBackup: {
+    enabled: process.env.SESSION_BACKUP_ENABLED !== 'false',
+    bucket: process.env.SESSION_BACKUP_BUCKET || 'cvisual-wa-sessions',
+    intervalMs: parseInt(process.env.SESSION_BACKUP_INTERVAL_MS || '600000', 10)
+  },
+
+  // Optional SecurGYM Cloud Bridge Worker (driven strictly via environment variables)
+  securgym: {
+    enabled: process.env.SECURGYM_ENABLED === 'true',
+    supabaseUrl: (process.env.SECURGYM_SUPABASE_URL || '').replace(/\/+$/, ''),
+    supabaseKey: process.env.SECURGYM_SERVICE_ROLE_KEY || process.env.SECURGYM_SUPABASE_ANON_KEY || '',
+    accountIndex: Math.max(1, parseInt(process.env.SECURGYM_CLOUD_ACCOUNT_INDEX || '1', 10)),
+    defaultCountryCode: (process.env.SECURGYM_DEFAULT_COUNTRY_CODE || '509').replace(/\D/g, '') || '509',
+    cronIntervalMs: parseInt(process.env.SECURGYM_CRON_INTERVAL_MS || String(60 * 60 * 1000), 10)
+  },
+
   // Puppeteer Settings
   puppeteer: {
     executablePath: resolveDefaultChromiumPath(),
@@ -67,9 +83,10 @@ export const config = {
     fastLane: {
       concurrency: parseInt(process.env.FAST_LANE_CONCURRENCY || '5', 10),
       minDelayMs: 3000,
-      maxDelayMs: 10000,
+      maxDelayMs: 9000,
       minTypingMs: 2000,
-      maxTypingMs: 4000
+      maxTypingMs: 4000,
+      dailyLimit: parseInt(process.env.MAX_TRANSACTIONAL_PER_DAY || '300', 10)
     },
 
     slowLane: {

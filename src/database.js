@@ -331,6 +331,72 @@ export const db = {
   },
 
   // ---------------- CVISUAL_WHATSAPP_ACCOUNTS ----------------
+  _getValidAccountColumns() {
+    return new Set([
+      'tenant_id',
+      'account_index',
+      'label',
+      'phone_number',
+      'service_status',
+      'qr_code_data_url',
+      'daily_reminder_limit',
+      'sent_reminders_today',
+      'sent_transactional_today',
+      'last_sent_at',
+      'last_reminder_sent_at',
+      'consecutive_reminders_count',
+      'restricted_until',
+      'is_enabled'
+    ]);
+  },
+
+  _filterAccountFields(fields = {}) {
+    const allowed = this._getValidAccountColumns();
+    const cleaned = {};
+    for (const [k, v] of Object.entries(fields)) {
+      if (allowed.has(k) && v !== undefined) {
+        cleaned[k] = v;
+      }
+    }
+    return cleaned;
+  },
+
+  _isPastUtcDay(isoTimestamp) {
+    if (!isoTimestamp) return false;
+    const d = new Date(isoTimestamp);
+    if (Number.isNaN(d.getTime())) return false;
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    return d.toISOString().slice(0, 10) < todayUtc;
+  },
+
+  async _resetAccountCountersIfNewDay(account) {
+    if (!account) return account;
+    const needsReset =
+      (account.last_sent_at && this._isPastUtcDay(account.last_sent_at)) ||
+      (account.last_reminder_sent_at && this._isPastUtcDay(account.last_reminder_sent_at));
+    if (!needsReset) return account;
+    if ((account.sent_reminders_today || 0) === 0 && (account.sent_transactional_today || 0) === 0 && (account.consecutive_reminders_count || 0) === 0) {
+      return account;
+    }
+
+    const resetPatch = {
+      sent_reminders_today: 0,
+      sent_transactional_today: 0,
+      consecutive_reminders_count: 0
+    };
+
+    if (isSupabaseConfigured) {
+      await supabaseClient
+        .from('cvisual_whatsapp_accounts')
+        .update(resetPatch)
+        .eq('account_index', account.account_index);
+    } else if (memoryStore.accounts.has(account.account_index)) {
+      const memAcc = memoryStore.accounts.get(account.account_index);
+      memoryStore.accounts.set(account.account_index, { ...memAcc, ...resetPatch });
+    }
+    return { ...account, ...resetPatch };
+  },
+
   async listAccounts() {
     if (isSupabaseConfigured) {
       const { data, error } = await supabaseClient
@@ -338,7 +404,11 @@ export const db = {
         .select('*')
         .order('account_index', { ascending: true });
       if (error) throw new Error(error.message);
-      return data || [];
+      const out = [];
+      for (const acc of data || []) {
+        out.push(await this._resetAccountCountersIfNewDay(acc));
+      }
+      return out;
     }
     return Array.from(memoryStore.accounts.values()).sort(
       (a, b) => a.account_index - b.account_index
@@ -354,15 +424,16 @@ export const db = {
         .eq('account_index', idx)
         .maybeSingle();
       if (error) return null;
-      return data;
+      return await this._resetAccountCountersIfNewDay(data);
     }
-    return memoryStore.accounts.get(idx) || null;
+    const mem = memoryStore.accounts.get(idx) || null;
+    return await this._resetAccountCountersIfNewDay(mem);
   },
 
   async createOrUpdateAccount(accountData) {
     const idx = parseInt(accountData.account_index, 10);
     const payload = {
-      ...accountData,
+      ...this._filterAccountFields(accountData),
       account_index: idx
     };
 
@@ -384,9 +455,12 @@ export const db = {
 
   async updateAccountStatus(accountIndex, serviceStatus, extraFields = {}) {
     const idx = parseInt(accountIndex, 10);
+    if (extraFields.error_message) {
+      console.warn(`[Database] Account ${idx} status=${serviceStatus}: ${extraFields.error_message}`);
+    }
     const updates = {
-      service_status: serviceStatus,
-      ...extraFields
+      ...this._filterAccountFields(extraFields),
+      service_status: serviceStatus
     };
 
     if (isSupabaseConfigured) {
@@ -405,7 +479,7 @@ export const db = {
 
     const account = memoryStore.accounts.get(idx);
     if (account) {
-      const updated = { ...account, ...updates };
+      const updated = { ...account, ...extraFields, service_status: serviceStatus };
       memoryStore.accounts.set(idx, updated);
       return updated;
     }
@@ -439,7 +513,7 @@ export const db = {
       return;
     }
 
-    const account = memoryStore.accounts.get(idx);
+    const account = await this.getAccountByIndex(idx);
     if (account) {
       account.last_sent_at = now;
       if (isReminder) {
@@ -543,7 +617,7 @@ export const db = {
   },
 
   async fetchNextPendingFastLane() {
-    const fastLaneKinds = ['receipt', 'welcome', 'otp', 'test'];
+    const fastLaneKinds = ['receipt', 'welcome', 'otp', 'test', 'manual_direct'];
     if (isSupabaseConfigured) {
       const { data, error } = await supabaseClient
         .from('cvisual_messages_outbox')
@@ -566,7 +640,7 @@ export const db = {
   },
 
   async fetchNextPendingSlowLane() {
-    const slowLaneKinds = ['reminder', 'marketing'];
+    const slowLaneKinds = ['reminder', 'reminder_7d', 'reminder_2d', 'reminder_0d', 'reminder_expired', 'marketing', 'manual'];
     if (isSupabaseConfigured) {
       const { data, error } = await supabaseClient
         .from('cvisual_messages_outbox')
@@ -586,6 +660,28 @@ export const db = {
       }
     }
     return null;
+  },
+
+  async incrementMessageRetryOrFail(id, errorMessage, maxRetries = 5) {
+    const existing = await this.getMessageById(id);
+    const nextRetry = (existing?.retry_count || 0) + 1;
+    const status = nextRetry >= maxRetries ? 'failed' : 'pending';
+    const updates = {
+      status,
+      retry_count: nextRetry,
+      error_message: errorMessage
+    };
+    if (isSupabaseConfigured) {
+      await supabaseClient
+        .from('cvisual_messages_outbox')
+        .update(updates)
+        .eq('id', id);
+      return status;
+    }
+    if (existing) {
+      memoryStore.outbox.set(id, { ...existing, ...updates });
+    }
+    return status;
   },
 
   async updateMessageStatus(id, status, { assignedAccountIndex, sentByPhone, errorMessage, sentAt } = {}) {

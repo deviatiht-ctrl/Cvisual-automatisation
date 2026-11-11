@@ -7,13 +7,18 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import apiRoutes from './api/routes.js';
+import securgymRoutes from './api/securgym_routes.js';
 import { clusterManager } from './whatsapp/cluster_manager.js';
+import { securGymBridge } from './securgym/bridge_worker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.resolve(__dirname, '../public');
 
 export const app = express();
+
+// Trust Render / Cloudflare reverse proxy for accurate req.ip without ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+app.set('trust proxy', 1);
 
 // Security & Headers (permitting CDN scripts and inline styles for Lucide icons and UI)
 app.use(helmet({
@@ -30,10 +35,10 @@ if (!process.env.VERCEL) {
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// API Rate Limiting (120 requests per minute)
+// API Rate Limiting (240 requests per minute)
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 120,
+  max: 240,
   standardHeaders: true,
   legacyHeaders: false,
   message: { ok: false, error: 'Too many requests. Please slow down.' }
@@ -41,19 +46,38 @@ const apiLimiter = rateLimit({
 
 app.use('/api/', apiLimiter);
 
-// Health check endpoint
+// Ultra-fast Health check endpoint (UptimeRobot keep-alive target — never blocks on Puppeteer)
 app.get('/health', (req, res) => {
+  const mem = process.memoryUsage();
+  const accounts = clusterManager.getAllAccounts();
   res.json({
+    ok: true,
     status: 'healthy',
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.floor(process.uptime()),
     environment: process.env.VERCEL ? 'vercel-serverless' : 'standalone-vps',
-    service: 'CVISUAL WhatsApp Gateway Multi-Tenant'
+    service: 'CVISUAL WhatsApp Gateway Multi-Tenant',
+    memoryMb: {
+      rss: Math.round(mem.rss / (1024 * 1024)),
+      heapUsed: Math.round(mem.heapUsed / (1024 * 1024)),
+      heapTotal: Math.round(mem.heapTotal / (1024 * 1024))
+    },
+    whatsapp: {
+      maxConcurrentAccounts: config.maxConcurrentAccounts,
+      readyAccounts: accounts.filter(a => a.isReady()).length,
+      accounts: accounts.map(a => ({
+        index: a.accountIndex,
+        status: a.status,
+        phone: a.phoneNumber || null
+      }))
+    },
+    securgymBridge: securGymBridge.getStats()
   });
 });
 
-// Mount REST API
+// Mount CVISUAL SaaS API first, then SecurGYM Cloud Gateway compatibility API
 app.use('/api/v1', apiRoutes);
+app.use('/api', securgymRoutes);
 
 // Static assets (Landing page, Client Dashboard, Admin Portal)
 app.use(express.static(publicDir));
@@ -77,14 +101,17 @@ if (!process.env.VERCEL) {
   const server = app.listen(config.port, '0.0.0.0', async () => {
     console.log(`================================================================`);
     console.log(`🚀 CVISUAL STANDALONE MULTI-TENANT WHATSAPP GATEWAY & SAAS`);
-    console.log(`📡 Server running on: http://localhost:${config.port}`);
-    console.log(`⚙️  Environment: ${config.nodeEnv}`);
+    console.log(`📡 Server running on: http://0.0.0.0:${config.port}`);
+    console.log(`⚙️  Environment: ${config.nodeEnv} | Node ${process.version}`);
+    console.log(`🧠 Max Concurrent Chromium Browsers: ${config.maxConcurrentAccounts}`);
     console.log(`🛡️  Shield: Spintax + Zero-Width Invisible Unicode Hash Active`);
-    console.log(`⚡ Dual-Lane Engine: Fast Lane (Instant) & Slow Lane (10-16 min)`);
+    console.log(`⚡ Dual-Lane Engine: Fast Lane (Instant) & Slow Lane (10-16 min, 25/day)`);
+    console.log(`🏋️  SecurGYM Cloud Bridge: ${securGymBridge.isEnabled() ? 'ACTIVE' : 'DISABLED'}`);
     console.log(`================================================================`);
 
     try {
       await clusterManager.initializeCluster();
+      await securGymBridge.start();
     } catch (err) {
       console.error('[Cluster Startup Error]:', err.message);
     }
@@ -92,23 +119,21 @@ if (!process.env.VERCEL) {
 
   const shutdown = async (signal) => {
     console.log(`\n[System] Received ${signal}. Gracefully stopping WhatsApp Gateway...`);
+    securGymBridge.stop();
     clusterManager.stop();
 
     const accounts = clusterManager.getAllAccounts();
     for (const acc of accounts) {
       try {
-        if (acc.client) {
-          await acc.client.destroy();
-        }
-      } catch (e) {
-        // Ignore
-      }
+        await acc.destroyBrowserOnly();
+      } catch {}
     }
 
     server.close(() => {
       console.log('[System] HTTP server closed. Process terminated cleanly.');
       process.exit(0);
     });
+    setTimeout(() => process.exit(0), 5000).unref();
   };
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
