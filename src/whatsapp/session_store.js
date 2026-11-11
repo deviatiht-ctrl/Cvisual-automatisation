@@ -38,10 +38,13 @@ class SessionStore {
 
       const exists = Array.isArray(buckets) && buckets.some(b => b.name === bucketName || b.id === bucketName);
       if (!exists) {
-        const { error: createErr } = await supabase.storage.createBucket(bucketName, {
+        let { error: createErr } = await supabase.storage.createBucket(bucketName, {
           public: false,
-          fileSizeLimit: 104857600 // 100 MiB
+          fileSizeLimit: 45 * 1024 * 1024 // Respect Supabase free-tier 50 MiB object cap
         });
+        if (createErr && !String(createErr.message || '').toLowerCase().includes('already exists')) {
+          ({ error: createErr } = await supabase.storage.createBucket(bucketName, { public: false }));
+        }
         if (createErr && !String(createErr.message || '').toLowerCase().includes('already exists')) {
           console.warn('[SessionStore] createBucket error:', createErr.message);
           return false;
