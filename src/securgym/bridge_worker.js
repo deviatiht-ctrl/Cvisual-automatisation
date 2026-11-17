@@ -31,6 +31,81 @@ function buildPhoneVariants(digits) {
   return Array.from(variants);
 }
 
+/**
+ * Dynamic Expiration & Remaining Days Revalidation.
+ * Analyzes the end date DD/MM/YYYY in the message text.
+ * Prevents queuing delays from sending stale countdowns (e.g. saying 7 days when only 2 days left).
+ */
+export function adjustReminderMessage(text, kind) {
+  const dateMatch = String(text || '').match(/\b(\d{2})\/(\d{2})\/(\d{4})\b/);
+  if (!dateMatch) return { action: 'keep', text, effectiveKind: kind };
+
+  const [_, dd, mm, yyyy] = dateMatch;
+  const nowHaiti = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Port-au-Prince',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
+  const [currY, currM, currD] = nowHaiti.split('-').map(Number);
+  const targetUtc = Date.UTC(parseInt(yyyy, 10), parseInt(mm, 10) - 1, parseInt(dd, 10));
+  const currentUtc = Date.UTC(currY, currM - 1, currD);
+  const diffDays = Math.round((targetUtc - currentUtc) / (24 * 3600 * 1000));
+
+  if (diffDays < 0) {
+    return {
+      action: 'cancel',
+      reason: `Abonnement déjà expiré depuis ${Math.abs(diffDays)} jour(s) (${dateMatch[0]}) - annulé`
+    };
+  }
+  if (diffDays === 0) {
+    return {
+      action: 'cancel',
+      reason: `Dernier jour d'abonnement atteint (${dateMatch[0]}) - annulé selon politique anti-ban`
+    };
+  }
+  if (diffDays === 1) {
+    if (kind === 'reminder_7d') {
+      return {
+        action: 'cancel',
+        reason: `Rappel J-7 périmé (il ne reste qu'un jour, annulé pour éviter litige)`
+      };
+    }
+    // Adjust J-2 reminder that was delayed by 1 day
+    let updated = text
+      .replace(/dans (?:seulement )?(?:\*?)2 [Jj]ours(?:\*?)/g, 'demain')
+      .replace(/nan (?:sèlman )?(?:\*?)2 [Jj]ou(?:\*?)/g, 'demen')
+      .replace(/dans 2 [Jj]ours/gi, 'Demain')
+      .replace(/nan 2 [Jj]ou/gi, 'Demen');
+    return { action: 'send', text: updated, daysLeft: 1, effectiveKind: 'reminder_2d' };
+  }
+  if (diffDays === 2) {
+    // Member is currently at 2 days. If message still has 7 days wording, transform to 2 days urgent reminder!
+    let updated = text
+      .replace(/⏳ \*Rappel Fin d'Abonnement \(7 jours\)/gi, "⚠️ *Rappel Urgent : Fin d'Abonnement dans 2 Jours")
+      .replace(/⏳ \*Rapèl Fin Abònman \(7 Jou\)/gi, '⚠️ *Rapèl Enpòtan : Abònman w fini nan 2 Jou')
+      .replace(/dans (?:terme dans )?(?:\*?)7 jours(?:\*?)/gi, 'dans *2 jours*')
+      .replace(/nan (?:fen nan )?(?:\*?)7 jou(?:\*?)/gi, 'nan *2 jou*');
+    return { action: 'send', text: updated, daysLeft: 2, effectiveKind: 'reminder_2d' };
+  }
+  if (diffDays >= 3 && diffDays <= 6) {
+    // Delayed by a few days: dynamically adjust remaining days
+    let updated = text
+      .replace(/\(7 jours\)/gi, `(${diffDays} jours)`)
+      .replace(/\(7 [Jj]ou\)/gi, `(${diffDays} Jou)`)
+      .replace(/dans (?:terme dans )?(?:\*?)7 jours(?:\*?)/gi, `dans *${diffDays} jours*`)
+      .replace(/nan (?:fen nan )?(?:\*?)7 jou(?:\*?)/gi, `nan *${diffDays} jou*`);
+    return { action: 'send', text: updated, daysLeft: diffDays, effectiveKind: 'reminder_7d' };
+  }
+  if (diffDays === 7) {
+    return { action: 'send', text, daysLeft: 7, effectiveKind: 'reminder_7d' };
+  }
+  return {
+    action: 'cancel',
+    reason: `Date d'abonnement modifiée ou déjà renouvelée (il reste ${diffDays} jours)`
+  };
+}
+
 class SecurGymBridgeWorker {
   constructor() {
     this.isRunning = false;
@@ -432,11 +507,15 @@ class SecurGymBridgeWorker {
 
   /**
    * Blocks forbidden J-0 / Expired reminders, promotes misclassified Welcome / Receipt
-   * messages queued as `manual` by older desktop clients, and drops stale (>36h) reminders.
+   * messages queued as `manual` by older desktop clients, purges stale/expired reminders,
+   * and resolves conflicting duplicate J-7 vs J-2 reminders.
    */
   async sanitizePendingOutbox(limit = 40) {
     if (!this.isEnabled()) return;
     try {
+      // Trigger SQL-level purge RPC if available
+      await this._rpc('platform_whatsapp_purge_stale_reminders').catch(() => {});
+
       const res = await this._rest(
         `whatsapp_messages_outbox?status=eq.pending&order=created_at.asc&limit=${limit}`
       );
@@ -445,10 +524,18 @@ class SecurGymBridgeWorker {
       if (!Array.isArray(rows) || rows.length === 0) return;
 
       const now = Date.now();
+      const phonesWith2d = new Set(
+        rows
+          .filter(r => String(r.kind || '').toLowerCase().trim() === 'reminder_2d')
+          .map(r => normalizePhoneDigits(r.to_phone, config.securgym?.defaultCountryCode || '509'))
+          .filter(Boolean)
+      );
+
       for (const row of rows) {
         const rawKind = String(row.kind || 'manual').toLowerCase().trim();
         const msg = String(row.message || '');
         const pdfName = String(row.pdf_file_name || '');
+        const cleanPhone = normalizePhoneDigits(row.to_phone, config.securgym?.defaultCountryCode || '509');
 
         // 1. Never block explicit admin 'test' or 'otp'
         if (rawKind !== 'test' && rawKind !== 'otp') {
@@ -486,6 +573,25 @@ class SecurGymBridgeWorker {
           const ageMs = now - new Date(row.created_at).getTime();
           if (ageMs > 36 * 3600 * 1000) {
             await this._cancelOutboxRow(row.id, 'Rappel expiré (>36h) annulé pour protection Anti-Ban');
+            continue;
+          }
+        }
+
+        // 4. Resolve conflicting duplicate 7d and 2d for same recipient & purge expired
+        if (
+          rawKind === 'reminder_7d' ||
+          rawKind === 'reminder_2d' ||
+          rawKind === 'reminder' ||
+          /Rappel|Rapèl|Fin d'Abonnement|Fin Abònman/i.test(msg)
+        ) {
+          if (rawKind === 'reminder_7d' && phonesWith2d.has(cleanPhone)) {
+            await this._cancelOutboxRow(row.id, 'Ranplase pa rapèl J-2 pi fre nan menm liy la');
+            continue;
+          }
+          const adjustment = adjustReminderMessage(msg, rawKind);
+          if (adjustment.action === 'cancel') {
+            await this._cancelOutboxRow(row.id, adjustment.reason);
+            continue;
           }
         }
       }
@@ -599,7 +705,34 @@ class SecurGymBridgeWorker {
       return { skip: true };
     }
 
-    return { skip: false, cleanPhone, effectiveKind };
+    // Dynamic reminder re-validation & accurate day recalculation
+    if (
+      effectiveKind === 'reminder_7d' ||
+      effectiveKind === 'reminder_2d' ||
+      effectiveKind === 'reminder' ||
+      /Rappel|Rapèl|Fin d'Abonnement|Fin Abònman/i.test(msg)
+    ) {
+      const adjustment = adjustReminderMessage(msg, effectiveKind);
+      if (adjustment.action === 'cancel') {
+        await this._cancelOutboxRow(row.id, adjustment.reason);
+        return { skip: true };
+      }
+      if (adjustment.action === 'send') {
+        if (adjustment.text !== msg || adjustment.effectiveKind !== effectiveKind) {
+          effectiveKind = adjustment.effectiveKind || effectiveKind;
+          row.message = adjustment.text;
+          await this._rest(`whatsapp_messages_outbox?id=eq.${row.id}`, {
+            method: 'PATCH',
+            body: {
+              message: adjustment.text,
+              kind: effectiveKind
+            }
+          }).catch(() => {});
+        }
+      }
+    }
+
+    return { skip: false, cleanPhone, effectiveKind, message: row.message };
   }
 
   async _markProcessing(id, accountIndex) {
@@ -708,7 +841,7 @@ class SecurGymBridgeWorker {
 
                   await acc.sendMessage({
                     to: check.cleanPhone,
-                    text: row.message,
+                    text: check.message || row.message,
                     pdfBase64: row.pdf_base64,
                     pdfFileName: row.pdf_file_name,
                     kind: check.effectiveKind
@@ -786,7 +919,7 @@ class SecurGymBridgeWorker {
                       );
                       await acc.sendMessage({
                         to: check.cleanPhone,
-                        text: row.message,
+                        text: check.message || row.message,
                         pdfBase64: row.pdf_base64,
                         pdfFileName: row.pdf_file_name,
                         kind: check.effectiveKind
