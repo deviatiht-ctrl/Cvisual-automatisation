@@ -32,13 +32,51 @@ function buildPhoneVariants(digits) {
 }
 
 /**
+ * Strips online member portal renewal link & phone login exclusively for JL FITNESS.
+ * JL FITNESS members renew in person at reception only.
+ */
+export function stripOnlineRenewalForJlFitness(text) {
+  if (!/JL FITNESS/i.test(text)) return text;
+  let cleaned = String(text || '');
+
+  // French variant: replace 2-step renewal with reception only
+  cleaned = cleaned.replace(
+    /1\.\s*Passez à l'accueil de \*JL FITNESS\* pour renouveler votre formule\.[\s\r\n]*2\.\s*Ou faites votre demande de renouvellement en ligne\s*:[\s\r\n]*👉\s*https?:\/\/\S+[\s\r\n]*_Connectez-vous avec votre numéro\s*:_[\s\r\n]*\*[0-9+ ]+\*/gi,
+    "Passez à l'accueil de *JL FITNESS* pour renouveler votre formule."
+  );
+
+  // Haitian Creole variant: replace 2-step renewal with reception only
+  cleaned = cleaned.replace(
+    /1\.\s*Pase nan resepsyon \*JL FITNESS\* pou w renouvle l\.[\s\r\n]*2\.\s*Oswa fè demand renouvèlman an sou espas manm ou\s*:[\s\r\n]*👉\s*https?:\/\/\S+[\s\r\n]*_Konekte ak nimewo telefòn ou\s*:_[\s\r\n]*\*[0-9+ ]+\*/gi,
+    "Pase nan resepsyon *JL FITNESS* pou w renouvle l."
+  );
+
+  // English variant: replace 2-step renewal with reception only
+  cleaned = cleaned.replace(
+    /1\.\s*Visit \*JL FITNESS\* reception to renew\.[\s\r\n]*2\.\s*Or submit your renewal request online\s*:[\s\r\n]*👉\s*https?:\/\/\S+[\s\r\n]*_Log in with your phone number\s*:_[\s\r\n]*\*[0-9+ ]+\*/gi,
+    "Visit *JL FITNESS* reception to renew."
+  );
+
+  // Catch-all safety: strip any online portal link or phone login line for JL FITNESS
+  cleaned = cleaned.replace(/(?:2\.\s*)?(?:Ou faites votre demande de renouvellement en ligne|Oswa fè demand renouvèlman an sou espas manm ou|Or submit your renewal request online)\s*:?[\s\r\n]*👉\s*https?:\/\/\S+/gi, '');
+  cleaned = cleaned.replace(/_(?:Connectez-vous avec votre numéro|Konekte ak nimewo telefòn ou|Log in with your phone number)\s*:_[\s\r\n]*\*[0-9+ ]+\*/gi, '');
+  cleaned = cleaned.replace(/1\.\s*(Passez à l'accueil de \*JL FITNESS\* pour renouveler votre formule\.)/gi, '$1');
+  cleaned = cleaned.replace(/1\.\s*(Pase nan resepsyon \*JL FITNESS\* pou w renouvle l\.)/gi, '$1');
+  cleaned = cleaned.replace(/1\.\s*(Visit \*JL FITNESS\* reception to renew\.)/gi, '$1');
+  cleaned = cleaned.replace(/\n?🌐 (?:Votre espace|Espas ou|Your portal)\s*:\s*https?:\/\/\S+/gi, '');
+
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  return cleaned;
+}
+
+/**
  * Dynamic Expiration & Remaining Days Revalidation.
  * Analyzes the end date DD/MM/YYYY in the message text.
  * Prevents queuing delays from sending stale countdowns (e.g. saying 7 days when only 2 days left).
  */
 export function adjustReminderMessage(text, kind) {
   const dateMatch = String(text || '').match(/\b(\d{2})\/(\d{2})\/(\d{4})\b/);
-  if (!dateMatch) return { action: 'keep', text, effectiveKind: kind };
+  if (!dateMatch) return { action: 'keep', text: stripOnlineRenewalForJlFitness(text), effectiveKind: kind };
 
   const [_, dd, mm, yyyy] = dateMatch;
   const nowHaiti = new Intl.DateTimeFormat('en-CA', {
@@ -77,6 +115,7 @@ export function adjustReminderMessage(text, kind) {
       .replace(/nan (?:sèlman )?(?:\*?)2 [Jj]ou(?:\*?)/g, 'demen')
       .replace(/dans 2 [Jj]ours/gi, 'Demain')
       .replace(/nan 2 [Jj]ou/gi, 'Demen');
+    updated = stripOnlineRenewalForJlFitness(updated);
     return { action: 'send', text: updated, daysLeft: 1, effectiveKind: 'reminder_2d' };
   }
   if (diffDays === 2) {
@@ -86,6 +125,7 @@ export function adjustReminderMessage(text, kind) {
       .replace(/⏳ \*Rapèl Fin Abònman \(7 Jou\)/gi, '⚠️ *Rapèl Enpòtan : Abònman w fini nan 2 Jou')
       .replace(/dans (?:terme dans )?(?:\*?)7 jours(?:\*?)/gi, 'dans *2 jours*')
       .replace(/nan (?:fen nan )?(?:\*?)7 jou(?:\*?)/gi, 'nan *2 jou*');
+    updated = stripOnlineRenewalForJlFitness(updated);
     return { action: 'send', text: updated, daysLeft: 2, effectiveKind: 'reminder_2d' };
   }
   if (diffDays >= 3 && diffDays <= 6) {
@@ -95,10 +135,11 @@ export function adjustReminderMessage(text, kind) {
       .replace(/\(7 [Jj]ou\)/gi, `(${diffDays} Jou)`)
       .replace(/dans (?:terme dans )?(?:\*?)7 jours(?:\*?)/gi, `dans *${diffDays} jours*`)
       .replace(/nan (?:fen nan )?(?:\*?)7 jou(?:\*?)/gi, `nan *${diffDays} jou*`);
+    updated = stripOnlineRenewalForJlFitness(updated);
     return { action: 'send', text: updated, daysLeft: diffDays, effectiveKind: 'reminder_7d' };
   }
   if (diffDays === 7) {
-    return { action: 'send', text, daysLeft: 7, effectiveKind: 'reminder_7d' };
+    return { action: 'send', text: stripOnlineRenewalForJlFitness(text), daysLeft: 7, effectiveKind: 'reminder_7d' };
   }
   return {
     action: 'cancel',
