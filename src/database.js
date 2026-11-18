@@ -619,11 +619,15 @@ export const db = {
       }
     }
 
+    const metaMap = await this.getAllTenantMetaMap();
+
     return list.map(t => {
       const dedicated = linesMap.get(t.id) || t.dedicated_account_indices || [];
+      const meta = metaMap.get(t.id) || {};
       return {
         ...t,
-        dedicated_account_indices: Array.from(new Set(dedicated)).sort((a, b) => a - b)
+        dedicated_account_indices: Array.from(new Set(dedicated)).sort((a, b) => a - b),
+        expires_at: meta.expires_at || null
       };
     });
   },
