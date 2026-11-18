@@ -240,6 +240,72 @@ export const db = {
     return cleanIndices;
   },
 
+  async getTenantMeta(tenantId) {
+    if (!tenantId) return {};
+    if (isSupabaseConfigured) {
+      try {
+        const { data, error } = await supabaseClient
+          .from('settings')
+          .select('value')
+          .eq('key', `cvisual_tenant_meta_${tenantId}`)
+          .maybeSingle();
+        if (error || !data?.value) return {};
+        return typeof data.value === 'object' ? data.value : JSON.parse(data.value);
+      } catch {
+        return {};
+      }
+    }
+    return memoryStore.tenantMeta?.get(tenantId) || {};
+  },
+
+  async setTenantMeta(tenantId, meta) {
+    if (!tenantId) return {};
+    const current = await this.getTenantMeta(tenantId);
+    const updated = { ...current, ...meta };
+    if (isSupabaseConfigured) {
+      try {
+        await supabaseClient
+          .from('settings')
+          .upsert({
+            key: `cvisual_tenant_meta_${tenantId}`,
+            value: updated
+          });
+      } catch (err) {
+        console.warn(`[Database] setTenantMeta error for ${tenantId}:`, err.message);
+      }
+    } else {
+      if (!memoryStore.tenantMeta) memoryStore.tenantMeta = new Map();
+      memoryStore.tenantMeta.set(tenantId, updated);
+    }
+    return updated;
+  },
+
+  async getAllTenantMetaMap() {
+    const map = new Map();
+    if (isSupabaseConfigured) {
+      try {
+        const { data } = await supabaseClient
+          .from('settings')
+          .select('key, value')
+          .like('key', 'cvisual_tenant_meta_%');
+        if (data) {
+          for (const row of data) {
+            const tid = row.key.replace('cvisual_tenant_meta_', '');
+            const val = typeof row.value === 'object' ? row.value : JSON.parse(row.value);
+            map.set(tid, val);
+          }
+        }
+      } catch (err) {
+        console.warn('[Database] getAllTenantMetaMap error:', err.message);
+      }
+    } else if (memoryStore.tenantMeta) {
+      for (const [k, v] of memoryStore.tenantMeta.entries()) {
+        map.set(k, v);
+      }
+    }
+    return map;
+  },
+
   async getTenantByApiKey(apiKey) {
     if (!apiKey) return null;
     let tenant = null;
@@ -265,6 +331,8 @@ export const db = {
 
     if (tenant) {
       tenant.dedicated_account_indices = await this.getTenantDedicatedLines(tenant.id);
+      const meta = await this.getTenantMeta(tenant.id);
+      tenant.expires_at = meta?.expires_at || null;
     }
     return tenant;
   },
@@ -295,6 +363,8 @@ export const db = {
 
     if (tenant) {
       tenant.dedicated_account_indices = await this.getTenantDedicatedLines(tenant.id);
+      const meta = await this.getTenantMeta(tenant.id);
+      tenant.expires_at = meta?.expires_at || null;
     }
     return tenant;
   },
@@ -326,6 +396,8 @@ export const db = {
 
     if (tenant) {
       tenant.dedicated_account_indices = await this.getTenantDedicatedLines(tenant.id);
+      const meta = await this.getTenantMeta(tenant.id);
+      tenant.expires_at = meta?.expires_at || null;
     }
     return tenant;
   },
@@ -347,6 +419,8 @@ export const db = {
 
     if (tenant) {
       tenant.dedicated_account_indices = await this.getTenantDedicatedLines(tenant.id);
+      const meta = await this.getTenantMeta(tenant.id);
+      tenant.expires_at = meta?.expires_at || null;
     }
     return tenant;
   },
@@ -359,7 +433,8 @@ export const db = {
     monthlyQuota = 300,
     dailyQuota = 15,
     isActive = false,
-    dedicatedAccountIndices = []
+    dedicatedAccountIndices = [],
+    expiresAt = null
   }) {
     const apiKey = generateTenantApiKey();
     const cleanEmail = email && String(email).trim() ? String(email).trim().toLowerCase() : null;
@@ -399,6 +474,13 @@ export const db = {
       created.dedicated_account_indices = [];
     }
 
+    if (expiresAt) {
+      await this.setTenantMeta(created.id, { expires_at: expiresAt });
+      created.expires_at = expiresAt;
+    } else {
+      created.expires_at = null;
+    }
+
     return created;
   },
 
@@ -408,7 +490,12 @@ export const db = {
       dedicatedIndicesToUpdate = updates.dedicated_account_indices;
     }
 
-    const { dedicated_account_indices, ...cleanUpdates } = updates;
+    let expiresAtToUpdate = undefined;
+    if (updates.expires_at !== undefined) {
+      expiresAtToUpdate = updates.expires_at;
+    }
+
+    const { dedicated_account_indices, expires_at, ...cleanUpdates } = updates;
     const patch = { ...cleanUpdates, updated_at: new Date().toISOString() };
     let updated = null;
 
@@ -432,8 +519,14 @@ export const db = {
       await this.setTenantDedicatedLines(id, dedicatedIndicesToUpdate);
     }
 
+    if (expiresAtToUpdate !== undefined && updated) {
+      await this.setTenantMeta(id, { expires_at: expiresAtToUpdate });
+    }
+
     if (updated) {
       updated.dedicated_account_indices = await this.getTenantDedicatedLines(id);
+      const meta = await this.getTenantMeta(id);
+      updated.expires_at = meta?.expires_at || null;
     }
     return updated;
   },

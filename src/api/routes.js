@@ -212,6 +212,16 @@ router.get('/me', authenticateApiKey, async (req, res) => {
     const dailyQuota = Number(req.tenant.daily_quota ?? 15);
     const monthlyQuota = Number(req.tenant.monthly_quota ?? 300);
     const tenantDedicated = req.tenant.dedicated_account_indices || [];
+    const expiresAt = req.tenant.expires_at || null;
+    let isExpired = false;
+    let daysRemaining = null;
+    if (expiresAt) {
+      const expTime = new Date(expiresAt).getTime();
+      if (!isNaN(expTime)) {
+        isExpired = expTime < Date.now();
+        daysRemaining = Math.max(0, Math.ceil((expTime - Date.now()) / (24 * 3600 * 1000)));
+      }
+    }
 
     res.json({
       ok: true,
@@ -225,6 +235,9 @@ router.get('/me', authenticateApiKey, async (req, res) => {
         monthly_quota: monthlyQuota,
         dedicated_account_indices: tenantDedicated,
         has_dedicated_lines: tenantDedicated.length > 0,
+        expires_at: expiresAt,
+        is_expired: isExpired,
+        days_remaining: daysRemaining,
         is_active: req.tenant.is_active,
         created_at: req.tenant.created_at
       },
@@ -1362,7 +1375,9 @@ router.post('/admin/api-keys', requireAdmin, async (req, res) => {
       daily_quota,
       monthly_quota,
       is_active = true,
-      dedicated_account_indices = []
+      dedicated_account_indices = [],
+      expires_at = null,
+      duration_days = null
     } = req.body || {};
 
     if (!name || !String(name).trim()) {
@@ -1413,6 +1428,17 @@ router.post('/admin/api-keys', requireAdmin, async (req, res) => {
       });
     }
 
+    let finalExpiresAt = null;
+    if (expires_at) {
+      const d = new Date(expires_at);
+      if (!isNaN(d.getTime())) finalExpiresAt = d.toISOString();
+    } else if (duration_days) {
+      const days = parseInt(duration_days, 10);
+      if (Number.isInteger(days) && days > 0) {
+        finalExpiresAt = new Date(Date.now() + days * 86400000).toISOString();
+      }
+    }
+
     const tenant = await db.createTenant({
       userId: null,
       name: String(name).trim(),
@@ -1421,7 +1447,8 @@ router.post('/admin/api-keys', requireAdmin, async (req, res) => {
       dailyQuota: parsedDaily,
       monthlyQuota: parsedMonthly,
       isActive: Boolean(is_active),
-      dedicatedAccountIndices: cleanIndices
+      dedicatedAccountIndices: cleanIndices,
+      expiresAt: finalExpiresAt
     });
 
     res.status(201).json({
@@ -1597,6 +1624,29 @@ router.patch('/admin/tenants/:id', requireAdmin, async (req, res) => {
         });
       }
       updates.dedicated_account_indices = cleanIndices;
+    }
+
+    if (req.body.expires_at !== undefined) {
+      if (req.body.expires_at === null || req.body.expires_at === '') {
+        updates.expires_at = null;
+      } else {
+        const d = new Date(req.body.expires_at);
+        if (isNaN(d.getTime())) {
+          return res.status(400).json({
+            ok: false,
+            code: 'INVALID_EXPIRES_AT',
+            error: 'expires_at must be a valid ISO 8601 date string or null.'
+          });
+        }
+        updates.expires_at = d.toISOString();
+      }
+    } else if (req.body.duration_days !== undefined) {
+      const days = parseInt(req.body.duration_days, 10);
+      if (Number.isInteger(days) && days > 0) {
+        updates.expires_at = new Date(Date.now() + days * 86400000).toISOString();
+      } else if (days === 0 || req.body.duration_days === null) {
+        updates.expires_at = null;
+      }
     }
 
     const updated = await db.updateTenant(id, updates);

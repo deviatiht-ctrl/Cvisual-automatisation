@@ -310,7 +310,8 @@ window.adminController = {
           daily_quota,
           monthly_quota,
           is_active: true,
-          dedicated_account_indices
+          dedicated_account_indices,
+          duration_days: document.getElementById("create-key-duration")?.value !== "unlimited" ? parseInt(document.getElementById("create-key-duration")?.value, 10) : null
         })
       });
       const data = await res.json();
@@ -536,6 +537,20 @@ window.adminController = {
           ? `<div style="margin-top:4px;"><span class="badge" style="background:#0F766E; color:#fff; font-size:0.68rem; font-weight:600;"><i data-lucide="shield-check" class="icon-sm" style="vertical-align:middle;"></i> Liy: #${dedicatedLines.join(', #')} (Eksklizif)</span></div>`
           : `<div style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;">Liy pataje</div>`;
 
+        let expiryHtml = '';
+        if (t.expires_at) {
+          const expDate = new Date(t.expires_at);
+          const daysLeft = Math.ceil((expDate.getTime() - Date.now()) / (24 * 3600 * 1000));
+          const formattedDate = expDate.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+          if (daysLeft > 0) {
+            expiryHtml = `<div style="font-size:0.73rem; color:#10B981; font-weight:600; margin-top:3px;"><i data-lucide="calendar-check" class="icon-sm"></i> Valab: ${formattedDate} (${daysLeft}j)</div>`;
+          } else {
+            expiryHtml = `<div style="font-size:0.73rem; color:#EF4444; font-weight:bold; margin-top:3px;"><i data-lucide="alert-triangle" class="icon-sm"></i> EKSPIRÉ (${formattedDate})</div>`;
+          }
+        } else {
+          expiryHtml = `<div style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;"><i data-lucide="infinity" class="icon-sm"></i> San limit</div>`;
+        }
+
         return `
           <tr>
             <td><strong>${window.escapeHtml(t.name)}</strong>${masterBadge}</td>
@@ -543,6 +558,7 @@ window.adminController = {
             <td>
               <span class="badge badge-primary">${window.escapeHtml((t.plan_tier || 'starter').toUpperCase())}</span>
               ${dedicatedBadge}
+              ${expiryHtml}
               <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">${daily}/j · ${monthly}/mois</div>
             </td>
             <td style="font-size:0.82rem;">
@@ -555,8 +571,8 @@ window.adminController = {
             <td>${statusBadge}</td>
             <td>
               <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                <button class="btn btn-secondary btn-xs" onclick="window.adminController.openEditDedicatedLinesModal('${t.id}')" title="Jere Liy Dedye Eksklizif">
-                  <i data-lucide="shield" class="icon-sm"></i> Liy
+                <button class="btn btn-primary btn-xs" onclick="window.adminController.openEditTenantModal('${t.id}')" title="Modifier Tout (Non, Liy Eksklizif, Kota, Ekspirasyon, Bloke)">
+                  <i data-lucide="edit-3" class="icon-sm"></i> Modifier Tout
                 </button>
                 <button class="btn btn-secondary btn-xs" onclick="window.adminController.toggleTenantKeyVisibility('${t.id}')" title="Afficher/Masquer">
                   <i data-lucide="${isRevealed ? 'eye-off' : 'eye'}" class="icon-sm"></i>
@@ -588,6 +604,155 @@ window.adminController = {
       refreshLucideIcons();
     } catch (e) {
       console.warn('[Fetch Tenants Error]:', e);
+    }
+  },
+
+
+  openEditTenantModal(tenantId) {
+    const t = this.tenantsList.find(x => x.id === tenantId);
+    if (!t) return;
+    this.editingTenantId = tenantId;
+
+    document.getElementById('edit-tenant-name').value = t.name || '';
+    document.getElementById('edit-tenant-email').value = t.email || '';
+    document.getElementById('edit-tenant-plan').value = t.plan_tier || 'pro';
+    document.getElementById('edit-tenant-is-active').value = String(Boolean(t.is_active));
+    document.getElementById('edit-tenant-daily').value = t.daily_quota ?? 15;
+    document.getElementById('edit-tenant-monthly').value = t.monthly_quota ?? 300;
+
+    const durSelect = document.getElementById('edit-tenant-duration');
+    if (durSelect) durSelect.value = 'keep';
+    const customDateInput = document.getElementById('edit-tenant-custom-date');
+    if (customDateInput) customDateInput.style.display = 'none';
+
+    const expiryInfo = document.getElementById('edit-tenant-current-expiry');
+    if (expiryInfo) {
+      if (t.expires_at) {
+        const expDate = new Date(t.expires_at);
+        const daysLeft = Math.ceil((expDate.getTime() - Date.now()) / (24 * 3600 * 1000));
+        expiryInfo.innerHTML = "Expiration actuelle : <strong>" + expDate.toLocaleString() + "</strong> (" + (daysLeft > 0 ? daysLeft + " jours restants" : "<span style='color:var(--accent-danger)'>Expirée</span>") + ")";
+      } else {
+        expiryInfo.innerHTML = "Expiration actuelle : <strong>Illimité (Aucune date d'expiration)</strong>";
+      }
+    }
+
+    const container = document.getElementById('edit-dedicated-lines-container');
+    const accounts = this.accountsList || [];
+    const currentLines = Array.isArray(t.dedicated_account_indices) ? t.dedicated_account_indices : [];
+
+    if (accounts.length === 0) {
+      container.innerHTML = '<span style="font-size:0.8rem; color:var(--text-muted);">Aucune ligne WhatsApp connectée.</span>';
+    } else {
+      container.innerHTML = accounts.map(a => {
+        const idx = a.account_index;
+        const otherTenant = this.tenantsList.find(other =>
+          other.id !== tenantId &&
+          Array.isArray(other.dedicated_account_indices) &&
+          other.dedicated_account_indices.includes(idx)
+        );
+        const isTakenByOther = Boolean(otherTenant);
+        const isChecked = currentLines.includes(idx);
+        const phone = a.phone_number ? '+' + a.phone_number : 'Déconnecté';
+        const label = window.escapeHtml(a.label || 'SIM ' + idx);
+
+        if (isTakenByOther) {
+          return '<label style="display:flex; align-items:center; gap:8px; font-size:0.83rem; color:var(--text-muted); opacity:0.6; cursor:not-allowed;">' +
+            '<input type="checkbox" disabled>' +
+            '<span><strong>Liy #' + idx + '</strong> (' + label + ' · ' + phone + ')</span>' +
+            '<span class="badge badge-muted" style="font-size:0.68rem; margin-left:auto;">Dedye pou "' + window.escapeHtml(otherTenant.name) + '"</span>' +
+          '</label>';
+        }
+
+        return '<label style="display:flex; align-items:center; gap:8px; font-size:0.83rem; color:var(--text-main); cursor:pointer;">' +
+          '<input type="checkbox" class="edit-dedicated-line-chk" value="' + idx + '" ' + (isChecked ? 'checked' : '') + ' onchange="window.adminController.handleEditLineSelectionChange();">' +
+          '<span><strong>Liy #' + idx + '</strong> (' + label + ' · ' + phone + ')</span>' +
+          '<span class="badge badge-success" style="font-size:0.68rem; margin-left:auto;">' + (isChecked ? 'Dedye Kounye a' : 'Disponib') + '</span>' +
+        '</label>';
+      }).join('');
+    }
+
+    this.handleEditPlanChange();
+    this.handleEditLineSelectionChange();
+    openModal('modal-edit-tenant');
+    refreshLucideIcons();
+  },
+
+  handleEditPlanChange() {
+    const plan = document.getElementById('edit-tenant-plan')?.value || 'pro';
+    const section = document.getElementById('edit-dedicated-section');
+    if (section) {
+      section.style.display = plan === 'starter' ? 'none' : 'block';
+    }
+  },
+
+  handleEditDurationChange() {
+    const val = document.getElementById('edit-tenant-duration')?.value;
+    const customInput = document.getElementById('edit-tenant-custom-date');
+    if (customInput) {
+      customInput.style.display = val === 'custom' ? 'block' : 'none';
+    }
+  },
+
+  async saveTenantDetails() {
+    if (!this.editingTenantId) return;
+    const btn = document.getElementById('btn-save-tenant-details');
+    const name = document.getElementById('edit-tenant-name')?.value.trim();
+    const email = document.getElementById('edit-tenant-email')?.value.trim();
+    const plan_tier = document.getElementById('edit-tenant-plan')?.value || 'pro';
+    const is_active = document.getElementById('edit-tenant-is-active')?.value === 'true';
+    const daily_quota = parseInt(document.getElementById('edit-tenant-daily')?.value, 10);
+    const monthly_quota = parseInt(document.getElementById('edit-tenant-monthly')?.value, 10);
+
+    const checkedLines = Array.from(document.querySelectorAll('.edit-dedicated-line-chk:checked'))
+      .map(el => parseInt(el.value, 10))
+      .filter(i => Number.isInteger(i) && i > 0);
+
+    if (plan_tier === 'pro' && checkedLines.length > 2) {
+      alert('Plan Pro autorise au maximum 2 lignes dédiées exclusives.');
+      return;
+    }
+
+    const durationVal = document.getElementById('edit-tenant-duration')?.value;
+    const customDateVal = document.getElementById('edit-tenant-custom-date')?.value;
+
+    const payload = {
+      name,
+      email: email || null,
+      plan_tier,
+      is_active,
+      daily_quota,
+      monthly_quota,
+      dedicated_account_indices: plan_tier === 'starter' ? [] : checkedLines
+    };
+
+    if (durationVal === 'unlimited') {
+      payload.expires_at = null;
+    } else if (durationVal === 'custom' && customDateVal) {
+      payload.expires_at = new Date(customDateVal).toISOString();
+    } else if (durationVal !== 'keep' && !isNaN(parseInt(durationVal, 10))) {
+      payload.duration_days = parseInt(durationVal, 10);
+    }
+
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/v1/admin/tenants/' + this.editingTenantId, {
+        method: 'PATCH',
+        headers: this.getAdminHeaders(true),
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        closeModal('modal-edit-tenant');
+        await this.fetchTenantsList();
+        await this.fetchWhatsAppAccounts();
+        alert('Modifikasyon yo anrejistre avèk siksè pou ' + name + ' !');
+      } else {
+        alert('Erreur: ' + (data.error || 'Impossible d’enregistrer'));
+      }
+    } catch (err) {
+      alert('Erreur réseau: ' + err.message);
+    } finally {
+      btn.disabled = false;
     }
   },
 

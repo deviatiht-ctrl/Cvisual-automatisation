@@ -135,6 +135,17 @@ export async function authenticateApiKey(req, res, next) {
       });
     }
 
+    if (tenant.expires_at) {
+      const expTime = new Date(tenant.expires_at).getTime();
+      if (!isNaN(expTime) && expTime < Date.now()) {
+        return res.status(403).json({
+          ok: false,
+          code: 'API_KEY_EXPIRED',
+          error: `Clé API expirée le ${tenant.expires_at}. Veuillez contacter l'administrateur pour renouveler votre accès.`
+        });
+      }
+    }
+
     req.tenant = tenant;
     req.isAdmin = Boolean(tenant.email && isAdminEmail(tenant.email));
     next();

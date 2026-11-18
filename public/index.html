@@ -1123,7 +1123,7 @@
           </div>
         </div>
 
-        <div class="grid-2" style="gap:12px; margin-bottom:18px;">
+        <div class="grid-2" style="gap:12px; margin-bottom:14px;">
           <div>
             <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Quota Journalier :</label>
             <input type="number" id="create-key-daily" value="100" min="1" max="50000" required>
@@ -1133,6 +1133,19 @@
             <input type="number" id="create-key-monthly" value="3000" min="1" max="1000000" required>
           </div>
         </div>
+
+        <div style="margin-bottom:16px;">
+          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Durée de validité de la Clé API :</label>
+          <select id="create-key-duration">
+            <option value="30" selected>30 Jours (1 Mois)</option>
+            <option value="60">60 Jours (2 Mois)</option>
+            <option value="90">90 Jours (3 Mois)</option>
+            <option value="180">180 Jours (6 Mois)</option>
+            <option value="365">365 Jours (1 An)</option>
+            <option value="unlimited">Illimité (Sans expiration)</option>
+          </select>
+        </div>
+
         <button type="submit" id="btn-submit-create-apikey" class="btn btn-primary" style="width:100%;">
           <i data-lucide="key" class="icon-sm"></i> Générer la Clé API Maintenant
         </button>
@@ -1189,41 +1202,104 @@
     </div>
   </div>
 
-  <!-- ================= MODALE: MODIFIER LIGNES DÉDIÉES ================= -->
-  <div id="modal-edit-dedicated-lines" class="modal-overlay">
-    <div class="modal-box">
+  <!-- ================= MODALE: MODIFIER & GÉRER LOCATAIRE (TOUT-EN-UN) ================= -->
+  <div id="modal-edit-tenant" class="modal-overlay">
+    <div class="modal-box modal-lg" style="max-width: 620px;">
       <div class="modal-header">
-        <h3 style="font-size: 1.15rem; font-weight: 700;">Liy WhatsApp Dedye Eksklizif</h3>
-        <button class="modal-close" onclick="closeModal('modal-edit-dedicated-lines');">
+        <h3 style="font-size: 1.2rem; font-weight: 700;">
+          <i data-lucide="edit-3" class="icon-sm" style="color:var(--accent-primary); vertical-align:middle;"></i>
+          Modifier & Gérer l'Entreprise / Clé API
+        </h3>
+        <button class="modal-close" onclick="closeModal('modal-edit-tenant');">
           <i data-lucide="x" class="icon-md"></i>
         </button>
       </div>
 
-      <div style="margin-bottom:14px;">
-        <p style="font-size:0.86rem; color:var(--text-muted); margin-bottom:4px;">
-          Antrepriz : <strong id="edit-dedicated-tenant-name" style="color:var(--text-main);"></strong>
-        </p>
-        <p style="font-size:0.8rem; color:var(--text-muted);">
-          Plan : <span id="edit-dedicated-tenant-plan" class="badge badge-primary">PRO</span> ·
-          Chwazi 1 oswa 2 liy dedye pou antrepriz sa a. Tout mesaj antrepriz la ap pase sèlman sou liy sa yo, epi okenn lòt mesaj pap ka pase sou yo.
-        </p>
-      </div>
+      <form id="form-edit-tenant" onsubmit="event.preventDefault(); window.adminController.saveTenantDetails();">
+        <div class="grid-2" style="gap:12px; margin-bottom:12px;">
+          <div>
+            <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Nom de l'Entreprise / Site :</label>
+            <input type="text" id="edit-tenant-name" required>
+          </div>
+          <div>
+            <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Email de Contact :</label>
+            <input type="email" id="edit-tenant-email">
+          </div>
+        </div>
 
-      <div id="edit-dedicated-lines-container" style="display:flex; flex-direction:column; gap:8px; margin-bottom:18px;">
-        <!-- Checkboxes rendered dynamically -->
-      </div>
+        <div class="grid-2" style="gap:12px; margin-bottom:12px;">
+          <div>
+            <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Plan / Forfait :</label>
+            <select id="edit-tenant-plan" onchange="window.adminController.handleEditPlanChange();">
+              <option value="starter">Starter (15 / jour · 300 / mois)</option>
+              <option value="pro">Pro Business (100 / jour · 3 000 / mois • 1-2 Liy Dedye)</option>
+              <option value="enterprise">Enterprise (5 000 / jour · 100 000 / mois • Liy Dedye)</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Statut de la Clé :</label>
+            <select id="edit-tenant-is-active">
+              <option value="true">Actif (Autorisé)</option>
+              <option value="false">Bloqué (Désactivé immédiatement)</option>
+            </select>
+          </div>
+        </div>
 
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <span id="edit-dedicated-count" style="font-size:0.82rem; color:var(--text-muted); font-weight:600;">0 / 2 seleksyone</span>
-        <div style="display:flex; gap:8px;">
-          <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('modal-edit-dedicated-lines');">
+        <!-- Section Lignes Dédiées Exclusives -->
+        <div id="edit-dedicated-section" style="margin-bottom:14px; padding:12px; background:var(--bg-secondary); border-radius:8px; border:1px solid var(--border-color);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <label style="font-size:0.86rem; font-weight:700; color:var(--text-main);">
+              <i data-lucide="shield-check" class="icon-sm" style="color:var(--accent-primary); vertical-align:middle;"></i>
+              Liy WhatsApp Dedye Eksklizif (Plan Pro : 1 oswa 2 Liy)
+            </label>
+            <span id="edit-dedicated-count" style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">0 / 2 seleksyone</span>
+          </div>
+          <p style="font-size:0.78rem; color:var(--text-muted); margin-bottom:10px;">
+            Chwazi liy eksklizif pou antrepriz sa a. Okenn lòt mesaj oswa lòt gym pap ka janm pase sou liy sa yo !
+          </p>
+          <div id="edit-dedicated-lines-container" style="display:flex; flex-direction:column; gap:6px;">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+
+        <div class="grid-2" style="gap:12px; margin-bottom:14px;">
+          <div>
+            <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Quota Journalier :</label>
+            <input type="number" id="edit-tenant-daily" min="1" max="50000" required>
+          </div>
+          <div>
+            <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Quota Mensuel :</label>
+            <input type="number" id="edit-tenant-monthly" min="1" max="1000000" required>
+          </div>
+        </div>
+
+        <div style="margin-bottom:16px;">
+          <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Durée de validité / Expiration :</label>
+          <div class="grid-2" style="gap:12px;">
+            <select id="edit-tenant-duration" onchange="window.adminController.handleEditDurationChange();">
+              <option value="keep">Garder l'expiration actuelle</option>
+              <option value="unlimited">Illimité (Sans expiration)</option>
+              <option value="30">Définir / Prolonger : 30 Jours (+1 Mois)</option>
+              <option value="60">Définir / Prolonger : 60 Jours (+2 Mois)</option>
+              <option value="90">Définir / Prolonger : 90 Jours (+3 Mois)</option>
+              <option value="180">Définir / Prolonger : 180 Jours (+6 Mois)</option>
+              <option value="365">Définir / Prolonger : 365 Jours (+1 An)</option>
+              <option value="custom">Date personnalisée...</option>
+            </select>
+            <input type="datetime-local" id="edit-tenant-custom-date" style="display:none;">
+          </div>
+          <div id="edit-tenant-current-expiry" style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;"></div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('modal-edit-tenant');">
             Annuler
           </button>
-          <button type="button" id="btn-save-dedicated-lines" class="btn btn-primary btn-sm" onclick="window.adminController.saveTenantDedicatedLines();">
-            <i data-lucide="save" class="icon-sm"></i> Anrejistre Liy Dedye
+          <button type="submit" id="btn-save-tenant-details" class="btn btn-primary btn-sm">
+            <i data-lucide="save" class="icon-sm"></i> Enregistrer Tout
           </button>
         </div>
-      </div>
+      </form>
     </div>
   </div>
 
