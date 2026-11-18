@@ -501,6 +501,21 @@ curl -s "${url}/api/v1/me" \\
 
 ---
 
+## 5. AUTO-REPLY CONCIERGE IA & MESSAGES ENTRANTS (INBOUND)
+
+Sur les **Plans Pro et Enterprise**, la passerelle intègre un **Moteur Auto-Reply Concierge Intelligent** connecté en direct sur vos lignes dédiées (ex: Ligne #3 DALIGHT) :
+1. **Écoute Temps Réel (\`messages.upsert\`)** :
+   - Intercepte les messages entrants 1-à-1 en ignorant automatiquement vos propres messages (\`fromMe\`), les statuts et les groupes.
+   - Ignore les messages d'historique synchronisés lors des reconnexions.
+2. **Détection d'Intention & Réponses Contextuelles** :
+   - **Intention Réservation / Rendez-vous** : Détecte les mots-clés (\`randevou\`, \`rdv\`, \`rezerve\`, \`rezèv\`, \`reserv\`, \`plas\`, \`disponib\`, \`pale ak moun\`, etc.) et fournit les étapes de prise de rendez-vous avec le lien officiel (ex: \`https://dalightbeauty.com/pages/reservation-v2.html\`).
+   - **Alerte Manager Instantanée** : Envoie immédiatement une alerte WhatsApp privée au responsable (\`50947477221@s.whatsapp.net\`) avec le contact du client et son message pour prise en main rapide.
+   - **Informations Générales** : Pour toute autre question, le Concierge envoie l'adresse, les horaires, le menu des soins/prix et le lien de réservation.
+3. **Protection Anti-Spam & Cooldown** :
+   - Système de cooldown par numéro pour ne jamais surcharger un client qui envoie plusieurs messages consécutifs.
+
+---
+
 ## 5. ENDPOINTS REST COMPLETS (/api/v1/*)
 
 1. \`GET ${url}/health\` (public) -> État global serveur + lignes WhatsApp connectées.

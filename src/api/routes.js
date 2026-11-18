@@ -2,6 +2,7 @@ import express from 'express';
 import { db } from '../database.js';
 import { clusterManager, deliverWebhook } from '../whatsapp/cluster_manager.js';
 import { normalizePhoneDigits } from '../whatsapp/account_instance.js';
+import { DALIGHT_CONCIERGE_CONFIG } from '../whatsapp/auto_reply_engine.js';
 import {
   authenticateApiKey,
   extractBearerOrApiKey,
@@ -223,6 +224,15 @@ router.get('/me', authenticateApiKey, async (req, res) => {
       }
     }
 
+    const tenantMeta = await db.getTenantMeta(req.tenant.id).catch(() => null);
+    const isDalight =
+      req.tenant.id === 'c21aa659-f837-4c81-9e55-ccef534f9420' ||
+      (req.tenant.name && req.tenant.name.toLowerCase().includes('dalight')) ||
+      tenantDedicated.includes(3);
+    const autoReply =
+      tenantMeta?.auto_reply ||
+      (isDalight ? { enabled: true, ...DALIGHT_CONCIERGE_CONFIG } : { enabled: false });
+
     res.json({
       ok: true,
       is_admin: req.isAdmin,
@@ -238,6 +248,7 @@ router.get('/me', authenticateApiKey, async (req, res) => {
         expires_at: expiresAt,
         is_expired: isExpired,
         days_remaining: daysRemaining,
+        auto_reply: autoReply,
         is_active: req.tenant.is_active,
         created_at: req.tenant.created_at
       },
@@ -1649,10 +1660,71 @@ router.patch('/admin/tenants/:id', requireAdmin, async (req, res) => {
       }
     }
 
+    if (req.body.auto_reply !== undefined) {
+      await db.setTenantMeta(id, { auto_reply: req.body.auto_reply });
+    }
+
     const updated = await db.updateTenant(id, updates);
     res.json({ ok: true, tenant: updated, message: 'Locataire mis à jour avec succès.' });
   } catch (err) {
     res.status(500).json({ ok: false, code: 'TENANT_UPDATE_ERROR', error: err.message });
+  }
+});
+
+router.get('/admin/tenants/:id/auto-reply', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const tenant = await db.getTenantById(id);
+    if (!tenant) {
+      return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Tenant not found.' });
+    }
+    const meta = (await db.getTenantMeta(id)) || {};
+    const isDalight =
+      id === 'c21aa659-f837-4c81-9e55-ccef534f9420' ||
+      (tenant.name && tenant.name.toLowerCase().includes('dalight')) ||
+      (tenant.dedicated_account_indices && tenant.dedicated_account_indices.includes(3));
+
+    const autoReply =
+      meta.auto_reply ||
+      (isDalight
+        ? {
+            enabled: true,
+            business_name: DALIGHT_CONCIERGE_CONFIG.business_name,
+            alert_phone: DALIGHT_CONCIERGE_CONFIG.alert_phone,
+            booking_url: DALIGHT_CONCIERGE_CONFIG.booking_url,
+            booking_keywords: DALIGHT_CONCIERGE_CONFIG.booking_keywords,
+            booking_reply: DALIGHT_CONCIERGE_CONFIG.buildBookingReply(),
+            general_reply: DALIGHT_CONCIERGE_CONFIG.buildGeneralReply()
+          }
+        : { enabled: false });
+
+    res.json({ ok: true, tenant_id: id, auto_reply: autoReply });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.patch('/admin/tenants/:id/auto-reply', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const tenant = await db.getTenantById(id);
+    if (!tenant) {
+      return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Tenant not found.' });
+    }
+    const currentMeta = (await db.getTenantMeta(id)) || {};
+    const updatedAutoReply = {
+      ...(currentMeta.auto_reply || {}),
+      ...(req.body || {})
+    };
+    await db.setTenantMeta(id, { auto_reply: updatedAutoReply });
+    res.json({
+      ok: true,
+      tenant_id: id,
+      auto_reply: updatedAutoReply,
+      message: 'Paramètres Auto-Reply Concierge mis à jour avec succès.'
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 

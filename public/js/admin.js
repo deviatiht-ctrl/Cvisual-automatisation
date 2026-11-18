@@ -636,6 +636,11 @@ window.adminController = {
       }
     }
 
+    const autoreplyChk = document.getElementById('edit-autoreply-enabled');
+    if (autoreplyChk) {
+      autoreplyChk.checked = t.auto_reply?.enabled !== false;
+    }
+
     const container = document.getElementById('edit-dedicated-lines-container');
     const accounts = this.accountsList || [];
     const currentLines = Array.isArray(t.dedicated_account_indices) ? t.dedicated_account_indices : [];
@@ -715,6 +720,7 @@ window.adminController = {
     const durationVal = document.getElementById('edit-tenant-duration')?.value;
     const customDateVal = document.getElementById('edit-tenant-custom-date')?.value;
 
+    const autoreplyEnabled = document.getElementById('edit-autoreply-enabled')?.checked;
     const payload = {
       name,
       email: email || null,
@@ -722,7 +728,8 @@ window.adminController = {
       is_active,
       daily_quota,
       monthly_quota,
-      dedicated_account_indices: plan_tier === 'starter' ? [] : checkedLines
+      dedicated_account_indices: plan_tier === 'starter' ? [] : checkedLines,
+      auto_reply: { enabled: Boolean(autoreplyEnabled) }
     };
 
     if (durationVal === 'unlimited') {
@@ -764,6 +771,11 @@ window.adminController = {
     document.getElementById('edit-dedicated-tenant-name').textContent = t.name;
     const planEl = document.getElementById('edit-dedicated-tenant-plan');
     planEl.textContent = (t.plan_tier || 'pro').toUpperCase();
+
+    const autoreplyChk = document.getElementById('edit-autoreply-enabled');
+    if (autoreplyChk) {
+      autoreplyChk.checked = t.auto_reply?.enabled !== false;
+    }
 
     const container = document.getElementById('edit-dedicated-lines-container');
     const accounts = this.accountsList || [];

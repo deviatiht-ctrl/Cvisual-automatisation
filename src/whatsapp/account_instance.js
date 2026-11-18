@@ -19,6 +19,7 @@ import { db } from '../database.js';
 import { config } from '../config.js';
 import { applySpintaxAndHashShield } from '../shield.js';
 import { sessionStore } from './session_store.js';
+import { handleIncomingMessageAutoReply } from './auto_reply_engine.js';
 
 const silentPinoLogger = pino({ level: 'silent' });
 const FALLBACK_WA_VERSION = [2, 3000, 1054146148];
@@ -507,9 +508,20 @@ export class WhatsAppAccountInstance extends EventEmitter {
         }
       });
 
-      sock.ev.on('messages.upsert', ({ messages }) => {
+      sock.ev.on('messages.upsert', async ({ messages, type }) => {
         for (const m of Array.isArray(messages) ? messages : []) {
           this._recordWaMessage(m);
+        }
+
+        try {
+          await handleIncomingMessageAutoReply({
+            accountInstance: this,
+            sock,
+            messages,
+            type
+          });
+        } catch (autoErr) {
+          console.error(`[Account ${this.accountIndex}] AutoReply error:`, autoErr?.message || autoErr);
         }
       });
 
