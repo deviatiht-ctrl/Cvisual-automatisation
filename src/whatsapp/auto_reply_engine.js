@@ -4,7 +4,7 @@ import { db } from '../database.js';
 // Cache message IDs processed within the last few minutes to prevent any duplicate replies
 const processedMessageIds = new Set();
 
-// Anti-spam cooldown per sender: senderPhone -> timestamp (ms)
+// Anti-spam debounce per sender: senderPhone -> timestamp (ms)
 const senderCooldowns = new Map();
 
 // Multi-turn conversation memory per phone: senderPhone -> [{ role: 'user'|'model', text }]
@@ -26,6 +26,67 @@ export function extractMessageText(messageObj) {
   }
   return '';
 }
+
+/**
+ * Closure & Courtesy acknowledgment patterns that should NOT trigger a reply.
+ * (e.g. "ok merci", "mèsi", "d'accord", "bonne journée", "bye", emojis alone, etc.)
+ */
+const CLOSURE_PATTERNS = [
+  /^(ok\s+)?(merci|m[eè]si|thanks)(\s+(beaucoup|anpil|anpil\s+wi))?[\s!.]*$/i,
+  /^(ok|d['’]?accord|dak[oò]r?|c['’]?est\s+not[eé]|se\s+not[eé]|parfait|super|tr[eè]s\s+bien)[\s!.]*$/i,
+  /^(bonne?\s+(journ[eé]e|soir[eé]e|apr[eè]s-midi)|[aà]\s+bient[oô]t|au\s+revoir|bye|tchao)[\s!.]*$/i,
+  /^(pa\s+gen\s+pwobl[eè]m|de\s+rien|avec\s+plaisir|pas\s+de\s+quoi)[\s!.]*$/i,
+  /^(d['’]?accord\s+merci|ok\s+m[eè]si|m[eè]si\s+oumenm|merci\s+[aà]\s+vous)[\s!.]*$/i,
+  /^[\p{Emoji}\s!.]+$/u
+];
+
+function isClosureOrNoReplyNeeded(text) {
+  if (!text) return true;
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return true;
+  return CLOSURE_PATTERNS.some(p => p.test(trimmed));
+}
+
+/**
+ * Default Built-in Concierge Configuration for DALIGHT (Line #3)
+ * Exported for backwards-compatibility with api/routes.js
+ */
+export const DALIGHT_CONCIERGE_CONFIG = {
+  business_name: 'DALIGHT Head Spa & Bien-Etre',
+  alert_phone: '50947477221',
+  booking_url: 'https://dalightbeauty.com/pages/reservation-v2.html',
+  booking_keywords: [
+    'randevou', 'rdv', 'rezerve', 'rezève', 'rezèv', 'reserv', 'plas', 'disponib', 'pale ak moun', 'humain', 'vle vin', 'prendre rdv', 'reserver'
+  ],
+  buildBookingReply: () => {
+    return (
+      `Bonjour et bienvenue chez DALIGHT ! ✨\n\n` +
+      `Pour planifier votre soin chez DALIGHT :\n\n` +
+      `1️⃣ Rendez-vous sur notre plateforme officielle :\n` +
+      `👉 https://dalightbeauty.com/pages/reservation-v2.html\n\n` +
+      `2️⃣ Choisissez votre soin, praticienne, date et heure.\n` +
+      `3️⃣ Validez votre créneau avec un acompte de 50% (MonCash, NatCash ou Virement).\n\n` +
+      `🔔 Notre responsable a également reçu votre demande et peut prendre le relais ici même d'un instant à l'autre !`
+    );
+  },
+  buildGeneralReply: () => {
+    return (
+      `Bonjour ! Bienvenue chez DALIGHT Head Spa & Bien-Être.\n\n` +
+      `Tous les jours de 07h00 à 17h00 (7j/7).\n` +
+      `Adresse : Delmas 65, Rue Faustin Premier / Rue Durandisse #10.\n` +
+      `Réservation : https://dalightbeauty.com/pages/reservation-v2.html\n\n` +
+      `Comment puis-je vous aider aujourd'hui ?`
+    );
+  },
+  buildAlertMessage: (senderPhone, text) => {
+    return (
+      `🚨 *ALERTE DALIGHT — INTENTION DE RDV DÉTECTÉE* 🌿\n\n` +
+      `👤 *Client :* +${senderPhone}\n` +
+      `💬 *Message :* « ${text} »\n` +
+      `👉 *Répondre :* https://wa.me/${senderPhone}`
+    );
+  }
+};
 
 // ----------------------------------------------------
 // DALIGHT LIVE SUPABASE SYNCHRONIZATION & GEMINI AI
@@ -93,12 +154,19 @@ async function getDalightGeminiKey() {
 
 /**
  * Generates an intelligent, natural response for DALIGHT customers
+ * Returns null if no reply is needed (silence for closure/irrelevant messages)
  */
 async function generateDalightAiResponse(senderPhone, userText) {
   const trimmed = userText.trim();
   const lower = trimmed.toLowerCase();
 
-  // Fast path for simple greetings (under 10ms response time)
+  // 1. FILTER: Polite closures or acknowledgments -> DO NOT REPLY (remain silent)
+  if (isClosureOrNoReplyNeeded(trimmed)) {
+    console.log(`[AutoReply Concierge] Closure / acknowledgment detected from +${senderPhone} ("${trimmed}") -> SILENCE (no reply needed).`);
+    return null;
+  }
+
+  // 2. Fast path for simple greetings (under 10ms response time)
   const isOnlyGreeting = /^(bonjour|bonjou|salut|hello|hi|bonswa|bonsoir|hey|alo|allo)[\s!\.]*$/i.test(trimmed);
   if (isOnlyGreeting) {
     return {
@@ -107,7 +175,7 @@ async function generateDalightAiResponse(senderPhone, userText) {
     };
   }
 
-  // Get live services
+  // Get live services from Supabase
   const services = await getLiveDalightServices();
   const servicesText = services.length
     ? services.map(s => `• ${s.name} : ${s.price_htg ? s.price_htg.toLocaleString() + ' HTG' : ''} (${s.price_usd ? '$' + s.price_usd + ' USD' : ''}) — Durée : ${s.duration || 'N/A'}`).join('\n')
@@ -116,8 +184,12 @@ async function generateDalightAiResponse(senderPhone, userText) {
   const systemInstruction = `Tu es le Concierge Virtuel officiel de DALIGHT Head Spa & Bien-Être sur WhatsApp.
 Tu parles avec des clients réels.
 
+RÈGLE ABSOLUE DE SILENCE ET DE PERTINENCE :
+- Si le message du client n'a AUCUN RAPPORT avec DALIGHT (hors-sujet total, message transféré, chaîne, spam, politique, insultes), réponds STRICTEMENT: [SILENCE]. Ne donne aucune autre réponse.
+- Si le message est un simple mot de clôture ou remerciement final (ex: "ok merci", "mèsi", "d'accord", "bonne journée"), réponds STRICTEMENT: [SILENCE].
+
 RÈGLES D'OR DE COMMUNICATION :
-1. PARLE NATURELLEMENT ET BRIÈVEMENT : 2 à 4 phrases maximum par message. Ne ponds JAMAIS de gros paragraphes ou de longs menus à moins que le client ne le demande expressément.
+1. PARLE NATURELLEMENT ET BRIÈVEMENT : 2 à 4 phrases maximum par message. Ne ponds JAMAIS de gros paragraphes ou de menus complets à moins que le client ne le demande.
 2. RÉPONDS EXACTEMENT À CE QUE LE CLIENT DEMANDE : S'il demande le prix du Head Spa, donne uniquement les prix du Head Spa clairement. S'il demande les horaires, donne les horaires.
 3. ADRESSE ET CONTACT :
    - Adresse : Delmas 65, Rue Faustin Premier / Rue Durandisse #10, Port-au-Prince, Haïti (parking privé sécurisé).
@@ -125,7 +197,7 @@ RÈGLES D'OR DE COMMUNICATION :
 4. HORAIRES OFFICIELS STRICTS :
    - TOUS LES JOURS (Lundi au Dimanche, 7j/7) de 07h00 à 17h00.
 5. PRISE DE RENDEZ-VOUS :
-   - Pour réserver, invite le client à donner son Nom, Prénom, E-mail, le soin désiré ainsi que la date et l'heure souhaitées, ou à réserver directement en ligne : https://dalightbeauty.com/pages/reservation-v2.html
+   - Pour réserver, invite le client à donner son Nom, Prénom, E-mail, le soin désiré ainsi que la date et l'heure souhaitées, ou à réserver en ligne : https://dalightbeauty.com/pages/reservation-v2.html
    - Acompte de 50% obligatoire (MonCash / NatCash / Virement Bancaire) pour confirmer.
 6. LANGUE : Si le client écrit en Créole Haïtien (Kreyòl), comprends-le parfaitement et réponds en Français élégant et chaleureux (ou en Kreyòl s'il insiste).
 
@@ -177,18 +249,23 @@ Option vidéo 4K souvenir : +500 HTG (réseaux sociaux) / +1 000 HTG (usage priv
       if (res.ok) {
         const data = await res.json();
         const reply = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-        if (reply) {
-          // Record history
-          history.push({ role: 'user', text: trimmed });
-          history.push({ role: 'assistant', text: reply });
-          if (history.length > 12) history.splice(0, history.length - 12);
-          conversationMemory.set(senderPhone, history);
-
-          return {
-            text: reply,
-            isBookingIntent
-          };
+        
+        // If AI decided silence is appropriate (closure or irrelevant)
+        if (!reply || reply.includes('[SILENCE]') || reply.trim().length === 0) {
+          console.log(`[AutoReply Concierge] Gemini returned [SILENCE] for message from +${senderPhone} -> no reply.`);
+          return null;
         }
+
+        // Record history
+        history.push({ role: 'user', text: trimmed });
+        history.push({ role: 'assistant', text: reply });
+        if (history.length > 12) history.splice(0, history.length - 12);
+        conversationMemory.set(senderPhone, history);
+
+        return {
+          text: reply,
+          isBookingIntent
+        };
       }
     } catch (err) {
       console.warn('[AutoReply DALIGHT] Gemini API error, falling back:', err.message);
@@ -196,6 +273,14 @@ Option vidéo 4K souvenir : +500 HTG (réseaux sociaux) / +1 000 HTG (usage priv
   }
 
   // Fallback if AI call failed
+  // Check if message is relevant before sending fallback
+  const isRelevant = /head\s*spa|massage|soin|cheveu|tarif|prix|combien|heure|horaire|adresse|ouvert|rdv|randevou|reserve|rendez/i.test(lower);
+  if (!isRelevant && !isBookingIntent) {
+    // If not relevant and not booking intent, remain silent
+    console.log(`[AutoReply Concierge] Fallback: Message from +${senderPhone} deemed not relevant -> SILENCE.`);
+    return null;
+  }
+
   let fallback = '';
   if (isBookingIntent) {
     fallback = `Avec plaisir ! Pour enregistrer votre rendez-vous chez DALIGHT, pouvez-vous me communiquer votre Nom complet, e-mail et la date souhaitée ?\n\nVous pouvez également réserver directement sur notre plateforme : https://dalightbeauty.com/pages/reservation-v2.html`;
@@ -316,6 +401,13 @@ export async function handleIncomingMessageAutoReply({ accountInstance, sock, me
       // 🌟 INTELLIGENT DALIGHT CONCIERGE (LIVE SUPABASE + GEMINI 3 FLASH)
       console.log(`[AutoReply Concierge] DALIGHT received: "${text.trim()}" from +${senderPhone}`);
       const aiResult = await generateDalightAiResponse(senderPhone, text);
+
+      // If aiResult is null (closure message like 'ok merci', or irrelevant message), DO NOT REPLY!
+      if (!aiResult || !aiResult.text) {
+        console.log(`[AutoReply Concierge] No reply needed for message: "${text.trim()}". Skipping.`);
+        continue;
+      }
+
       replyText = aiResult.text;
 
       // If client expressed intent to book, alert the DALIGHT manager
