@@ -128,8 +128,121 @@ export const db = {
   },
 
   // ---------------- CVISUAL_TENANTS ----------------
+  async getTenantDedicatedLines(tenantId) {
+    if (!tenantId) return [];
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabaseClient
+        .from('cvisual_whatsapp_accounts')
+        .select('account_index')
+        .eq('tenant_id', tenantId)
+        .order('account_index', { ascending: true });
+      if (error || !data) return [];
+      return data.map(r => r.account_index);
+    }
+    const memTenant = memoryStore.tenants.get(tenantId);
+    if (memTenant?.dedicated_account_indices) {
+      return [...memTenant.dedicated_account_indices].sort((a, b) => a - b);
+    }
+    const indices = [];
+    for (const [idx, acc] of memoryStore.accounts.entries()) {
+      if (acc.tenant_id === tenantId) indices.push(idx);
+    }
+    return indices.sort((a, b) => a - b);
+  },
+
+  async getAllDedicatedAccountIndices(excludeTenantId = null) {
+    if (isSupabaseConfigured) {
+      let query = supabaseClient
+        .from('cvisual_whatsapp_accounts')
+        .select('account_index, tenant_id')
+        .not('tenant_id', 'is', null);
+      if (excludeTenantId) {
+        query = query.neq('tenant_id', excludeTenantId);
+      }
+      const { data, error } = await query;
+      if (error || !data) return [];
+      return data.map(r => r.account_index);
+    }
+    const indices = [];
+    for (const [idx, acc] of memoryStore.accounts.entries()) {
+      if (acc.tenant_id && (!excludeTenantId || acc.tenant_id !== excludeTenantId)) {
+        indices.push(idx);
+      }
+    }
+    return indices;
+  },
+
+  async setTenantDedicatedLines(tenantId, accountIndices = []) {
+    if (!tenantId) return [];
+    const cleanIndices = Array.isArray(accountIndices)
+      ? accountIndices.map(i => parseInt(i, 10)).filter(i => Number.isInteger(i) && i > 0)
+      : [];
+
+    if (isSupabaseConfigured) {
+      // 1. Verify none of cleanIndices are taken by a DIFFERENT tenant
+      const { data: existingAccounts, error: checkErr } = await supabaseClient
+        .from('cvisual_whatsapp_accounts')
+        .select('account_index, tenant_id')
+        .not('tenant_id', 'is', null);
+      if (!checkErr && existingAccounts) {
+        for (const acc of existingAccounts) {
+          if (cleanIndices.includes(acc.account_index) && acc.tenant_id !== tenantId) {
+            throw new Error(`Liy WhatsApp #${acc.account_index} deja dedye pou yon lot antrepriz.`);
+          }
+        }
+      }
+
+      // 2. Clear tenant_id on lines previously assigned to this tenant but not in cleanIndices
+      const { data: previousAccounts } = await supabaseClient
+        .from('cvisual_whatsapp_accounts')
+        .select('account_index')
+        .eq('tenant_id', tenantId);
+
+      if (previousAccounts && previousAccounts.length > 0) {
+        const toRemove = previousAccounts
+          .map(a => a.account_index)
+          .filter(idx => !cleanIndices.includes(idx));
+        if (toRemove.length > 0) {
+          await supabaseClient
+            .from('cvisual_whatsapp_accounts')
+            .update({ tenant_id: null })
+            .in('account_index', toRemove);
+        }
+      }
+
+      // 3. Assign new lines
+      if (cleanIndices.length > 0) {
+        await supabaseClient
+          .from('cvisual_whatsapp_accounts')
+          .update({ tenant_id: tenantId })
+          .in('account_index', cleanIndices);
+      }
+    } else {
+      // Memory store
+      for (const [idx, acc] of memoryStore.accounts.entries()) {
+        if (cleanIndices.includes(idx) && acc.tenant_id && acc.tenant_id !== tenantId) {
+          throw new Error(`Liy WhatsApp #${idx} deja dedye pou yon lot antrepriz.`);
+        }
+      }
+      for (const [idx, acc] of memoryStore.accounts.entries()) {
+        if (cleanIndices.includes(idx)) {
+          acc.tenant_id = tenantId;
+        } else if (acc.tenant_id === tenantId) {
+          acc.tenant_id = null;
+        }
+      }
+      const memTenant = memoryStore.tenants.get(tenantId);
+      if (memTenant) {
+        memTenant.dedicated_account_indices = cleanIndices;
+      }
+    }
+
+    return cleanIndices;
+  },
+
   async getTenantByApiKey(apiKey) {
     if (!apiKey) return null;
+    let tenant = null;
     if (isSupabaseConfigured) {
       const { data, error } = await supabaseClient
         .from('cvisual_tenants')
@@ -140,17 +253,25 @@ export const db = {
         console.error('[Database] getTenantByApiKey error:', error.message);
         return null;
       }
-      return data;
+      tenant = data;
+    } else {
+      for (const t of memoryStore.tenants.values()) {
+        if (t.api_key === apiKey) {
+          tenant = t;
+          break;
+        }
+      }
     }
 
-    for (const tenant of memoryStore.tenants.values()) {
-      if (tenant.api_key === apiKey) return tenant;
+    if (tenant) {
+      tenant.dedicated_account_indices = await this.getTenantDedicatedLines(tenant.id);
     }
-    return null;
+    return tenant;
   },
 
   async getTenantByUserId(userId) {
     if (!userId) return null;
+    let tenant = null;
     if (isSupabaseConfigured) {
       const { data, error } = await supabaseClient
         .from('cvisual_tenants')
@@ -162,18 +283,26 @@ export const db = {
         console.error('[Database] getTenantByUserId error:', error.message);
         return null;
       }
-      return Array.isArray(data) && data.length > 0 ? data[0] : null;
+      tenant = Array.isArray(data) && data.length > 0 ? data[0] : null;
+    } else {
+      for (const t of memoryStore.tenants.values()) {
+        if (t.user_id === userId) {
+          tenant = t;
+          break;
+        }
+      }
     }
 
-    for (const tenant of memoryStore.tenants.values()) {
-      if (tenant.user_id === userId) return tenant;
+    if (tenant) {
+      tenant.dedicated_account_indices = await this.getTenantDedicatedLines(tenant.id);
     }
-    return null;
+    return tenant;
   },
 
   async getTenantByEmail(email) {
     if (!email) return null;
     const cleanEmail = email.trim().toLowerCase();
+    let tenant = null;
     if (isSupabaseConfigured) {
       const { data, error } = await supabaseClient
         .from('cvisual_tenants')
@@ -185,19 +314,25 @@ export const db = {
         console.error('[Database] getTenantByEmail error:', error.message);
         return null;
       }
-      return Array.isArray(data) && data.length > 0 ? data[0] : null;
-    }
-
-    for (const tenant of memoryStore.tenants.values()) {
-      if (tenant.email && tenant.email.toLowerCase() === cleanEmail) {
-        return tenant;
+      tenant = Array.isArray(data) && data.length > 0 ? data[0] : null;
+    } else {
+      for (const t of memoryStore.tenants.values()) {
+        if (t.email && t.email.toLowerCase() === cleanEmail) {
+          tenant = t;
+          break;
+        }
       }
     }
-    return null;
+
+    if (tenant) {
+      tenant.dedicated_account_indices = await this.getTenantDedicatedLines(tenant.id);
+    }
+    return tenant;
   },
 
   async getTenantById(id) {
     if (!id) return null;
+    let tenant = null;
     if (isSupabaseConfigured) {
       const { data, error } = await supabaseClient
         .from('cvisual_tenants')
@@ -205,9 +340,15 @@ export const db = {
         .eq('id', id)
         .maybeSingle();
       if (error) return null;
-      return data;
+      tenant = data;
+    } else {
+      tenant = memoryStore.tenants.get(id) || null;
     }
-    return memoryStore.tenants.get(id) || null;
+
+    if (tenant) {
+      tenant.dedicated_account_indices = await this.getTenantDedicatedLines(tenant.id);
+    }
+    return tenant;
   },
 
   async createTenant({
@@ -217,7 +358,8 @@ export const db = {
     planTier = 'starter',
     monthlyQuota = 300,
     dailyQuota = 15,
-    isActive = false
+    isActive = false,
+    dedicatedAccountIndices = []
   }) {
     const apiKey = generateTenantApiKey();
     const cleanEmail = email && String(email).trim() ? String(email).trim().toLowerCase() : null;
@@ -236,6 +378,7 @@ export const db = {
       updated_at: nowIso
     };
 
+    let created = null;
     if (isSupabaseConfigured) {
       const { data, error } = await supabaseClient
         .from('cvisual_tenants')
@@ -243,15 +386,32 @@ export const db = {
         .select()
         .single();
       if (error) throw new Error(error.message);
-      return data;
+      created = data;
+    } else {
+      memoryStore.tenants.set(newTenant.id, newTenant);
+      created = newTenant;
     }
 
-    memoryStore.tenants.set(newTenant.id, newTenant);
-    return newTenant;
+    if (dedicatedAccountIndices && Array.isArray(dedicatedAccountIndices) && dedicatedAccountIndices.length > 0) {
+      await this.setTenantDedicatedLines(created.id, dedicatedAccountIndices);
+      created.dedicated_account_indices = dedicatedAccountIndices;
+    } else {
+      created.dedicated_account_indices = [];
+    }
+
+    return created;
   },
 
   async updateTenant(id, updates) {
-    const patch = { ...updates, updated_at: new Date().toISOString() };
+    let dedicatedIndicesToUpdate = undefined;
+    if (updates.dedicated_account_indices !== undefined) {
+      dedicatedIndicesToUpdate = updates.dedicated_account_indices;
+    }
+
+    const { dedicated_account_indices, ...cleanUpdates } = updates;
+    const patch = { ...cleanUpdates, updated_at: new Date().toISOString() };
+    let updated = null;
+
     if (isSupabaseConfigured) {
       const { data, error } = await supabaseClient
         .from('cvisual_tenants')
@@ -260,12 +420,21 @@ export const db = {
         .select()
         .maybeSingle();
       if (error) throw new Error(error.message);
-      return data;
+      updated = data;
+    } else {
+      const tenant = memoryStore.tenants.get(id);
+      if (!tenant) return null;
+      updated = { ...tenant, ...patch };
+      memoryStore.tenants.set(id, updated);
     }
-    const tenant = memoryStore.tenants.get(id);
-    if (!tenant) return null;
-    const updated = { ...tenant, ...patch };
-    memoryStore.tenants.set(id, updated);
+
+    if (dedicatedIndicesToUpdate !== undefined && updated) {
+      await this.setTenantDedicatedLines(id, dedicatedIndicesToUpdate);
+    }
+
+    if (updated) {
+      updated.dedicated_account_indices = await this.getTenantDedicatedLines(id);
+    }
     return updated;
   },
 
@@ -276,6 +445,7 @@ export const db = {
 
   async deleteTenant(id) {
     if (!id) return false;
+    await this.setTenantDedicatedLines(id, []).catch(() => {});
     if (isSupabaseConfigured) {
       const { error } = await supabaseClient
         .from('cvisual_tenants')
@@ -327,17 +497,42 @@ export const db = {
   },
 
   async listTenants() {
+    let list = [];
     if (isSupabaseConfigured) {
       const { data, error } = await supabaseClient
         .from('cvisual_tenants')
         .select('*')
         .order('created_at', { ascending: false });
       if (error) throw new Error(error.message);
-      return data || [];
+      list = data || [];
+    } else {
+      list = Array.from(memoryStore.tenants.values()).sort(
+        (a, b) => new Date(b.created_at) - new Date(a.created_at)
+      );
     }
-    return Array.from(memoryStore.tenants.values()).sort(
-      (a, b) => new Date(b.created_at) - new Date(a.created_at)
-    );
+
+    // Attach dedicated lines
+    let accounts = [];
+    try {
+      accounts = await this.listAccounts();
+    } catch {
+      accounts = [];
+    }
+    const linesMap = new Map();
+    for (const acc of accounts) {
+      if (acc.tenant_id) {
+        if (!linesMap.has(acc.tenant_id)) linesMap.set(acc.tenant_id, []);
+        linesMap.get(acc.tenant_id).push(acc.account_index);
+      }
+    }
+
+    return list.map(t => {
+      const dedicated = linesMap.get(t.id) || t.dedicated_account_indices || [];
+      return {
+        ...t,
+        dedicated_account_indices: Array.from(new Set(dedicated)).sort((a, b) => a - b)
+      };
+    });
   },
 
   // ---------------- USAGE & QUOTAS ----------------

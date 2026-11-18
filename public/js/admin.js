@@ -179,14 +179,81 @@ window.adminController = {
     const form = document.getElementById('form-create-apikey');
     if (resultBox) resultBox.style.display = 'none';
     if (form) form.reset();
+    this.renderCreateKeyLinesList();
     this.handleCreatePlanChange();
     openModal('modal-create-apikey');
+  },
+
+  renderCreateKeyLinesList() {
+    const container = document.getElementById('create-key-lines-container');
+    if (!container) return;
+    const accounts = this.accountsList || [];
+
+    if (accounts.length === 0) {
+      container.innerHTML = `<span style="font-size:0.8rem; color:var(--text-muted);">Aucune ligne WhatsApp connectée dans le cluster.</span>`;
+      return;
+    }
+
+    container.innerHTML = accounts.map(a => {
+      const idx = a.account_index;
+      const assignedTenant = this.tenantsList.find(t =>
+        Array.isArray(t.dedicated_account_indices) && t.dedicated_account_indices.includes(idx)
+      );
+      const isTaken = Boolean(assignedTenant);
+      const phone = a.phone_number ? `+${a.phone_number}` : 'Déconnecté';
+      const label = window.escapeHtml(a.label || `SIM ${idx}`);
+
+      if (isTaken) {
+        return `
+          <label style="display:flex; align-items:center; gap:8px; font-size:0.82rem; color:var(--text-muted); opacity:0.65; cursor:not-allowed;">
+            <input type="checkbox" disabled>
+            <span><strong>Liy #${idx}</strong> (${label} · ${phone})</span>
+            <span class="badge badge-muted" style="font-size:0.68rem; margin-left:auto;">Dedye pou "${window.escapeHtml(assignedTenant.name)}"</span>
+          </label>
+        `;
+      }
+
+      return `
+        <label style="display:flex; align-items:center; gap:8px; font-size:0.83rem; color:var(--text-main); cursor:pointer;">
+          <input type="checkbox" class="create-key-line-chk" value="${idx}" onchange="window.adminController.handleCreateLineSelectionChange();">
+          <span><strong>Liy #${idx}</strong> (${label} · ${phone})</span>
+          <span class="badge badge-success" style="font-size:0.68rem; margin-left:auto;">Disponib</span>
+        </label>
+      `;
+    }).join('');
+
+    this.handleCreateLineSelectionChange();
+  },
+
+  handleCreateLineSelectionChange() {
+    const planEl = document.getElementById('create-key-plan');
+    const plan = planEl?.value || 'pro';
+    const checked = Array.from(document.querySelectorAll('.create-key-line-chk:checked'));
+    const countEl = document.getElementById('create-key-dedicated-count');
+
+    if (countEl) {
+      countEl.textContent = `${checked.length} / ${plan === 'pro' ? 2 : 'illimité'} seleksyone`;
+      countEl.style.color = (plan === 'pro' && checked.length > 2) ? 'var(--accent-danger)' : 'var(--text-muted)';
+    }
+
+    // If Pro plan and 2 selected, disable remaining unchecked
+    if (plan === 'pro') {
+      const allCheckboxes = Array.from(document.querySelectorAll('.create-key-line-chk'));
+      for (const cb of allCheckboxes) {
+        if (!cb.checked) {
+          cb.disabled = checked.length >= 2;
+        } else {
+          cb.disabled = false;
+        }
+      }
+    }
   },
 
   handleCreatePlanChange() {
     const planEl = document.getElementById('create-key-plan');
     const dailyEl = document.getElementById('create-key-daily');
     const monthlyEl = document.getElementById('create-key-monthly');
+    const dedSection = document.getElementById('create-key-dedicated-section');
     if (!planEl || !dailyEl || !monthlyEl) return;
 
     const defaults = {
@@ -197,6 +264,16 @@ window.adminController = {
 
     dailyEl.value = defaults.daily;
     monthlyEl.value = defaults.monthly;
+
+    if (dedSection) {
+      if (planEl.value === 'starter') {
+        dedSection.style.display = 'none';
+        document.querySelectorAll('.create-key-line-chk').forEach(cb => { cb.checked = false; cb.disabled = true; });
+      } else {
+        dedSection.style.display = 'block';
+        this.handleCreateLineSelectionChange();
+      }
+    }
   },
 
   async handleCreateApiKeySubmit(e) {
@@ -207,6 +284,15 @@ window.adminController = {
     const daily_quota = parseInt(document.getElementById('create-key-daily').value, 10);
     const monthly_quota = parseInt(document.getElementById('create-key-monthly').value, 10);
     const btn = document.getElementById('btn-submit-create-apikey');
+
+    const dedicated_account_indices = Array.from(document.querySelectorAll('.create-key-line-chk:checked'))
+      .map(el => parseInt(el.value, 10))
+      .filter(i => Number.isInteger(i) && i > 0);
+
+    if (plan_tier === 'pro' && dedicated_account_indices.length > 2) {
+      alert('Plan Pro autorise au maximum 2 lignes dédiées exclusives.');
+      return;
+    }
 
     if (!name) return;
     btn.disabled = true;
@@ -223,7 +309,8 @@ window.adminController = {
           plan_tier,
           daily_quota,
           monthly_quota,
-          is_active: true
+          is_active: true,
+          dedicated_account_indices
         })
       });
       const data = await res.json();
@@ -256,7 +343,10 @@ window.adminController = {
   async copyCreatedAiPrompt() {
     if (!this.lastCreatedTenant?.api_key) return;
     const baseUrl = document.getElementById('admin-base-url')?.textContent || window.getPublicGatewayUrl();
-    const prompt = window.buildAiIntegrationPrompt(baseUrl, this.lastCreatedTenant.api_key);
+    const prompt = window.buildAiIntegrationPrompt(baseUrl, this.lastCreatedTenant.api_key, {
+      dedicatedLines: this.lastCreatedTenant.dedicated_account_indices || [],
+      planTier: this.lastCreatedTenant.plan_tier
+    });
     await navigator.clipboard.writeText(prompt).catch(() => {});
     alert('Prompt complet pour IA copié !');
   },
@@ -290,7 +380,12 @@ window.adminController = {
     const preview = document.getElementById('ai-prompt-preview');
     if (!select || !preview) return;
     const baseUrl = document.getElementById('admin-base-url')?.textContent || window.getPublicGatewayUrl();
-    preview.value = window.buildAiIntegrationPrompt(baseUrl, select.value || '<VOTRE_CLE_API>');
+    const apiKey = select.value;
+    const t = this.tenantsList.find(x => x.api_key === apiKey) || (this.masterTenant?.api_key === apiKey ? this.masterTenant : null);
+    preview.value = window.buildAiIntegrationPrompt(baseUrl, apiKey || '<VOTRE_CLE_API>', {
+      dedicatedLines: t?.dedicated_account_indices || [],
+      planTier: t?.plan_tier || 'pro'
+    });
   },
 
   async copyAiPromptFromModal() {
@@ -436,12 +531,18 @@ window.adminController = {
           ? `<span class="badge badge-primary" style="margin-left:6px;">MASTER</span>`
           : '';
 
+        const dedicatedLines = Array.isArray(t.dedicated_account_indices) ? t.dedicated_account_indices : [];
+        const dedicatedBadge = dedicatedLines.length > 0
+          ? `<div style="margin-top:4px;"><span class="badge" style="background:#0F766E; color:#fff; font-size:0.68rem; font-weight:600;"><i data-lucide="shield-check" class="icon-sm" style="vertical-align:middle;"></i> Liy: #${dedicatedLines.join(', #')} (Eksklizif)</span></div>`
+          : `<div style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;">Liy pataje</div>`;
+
         return `
           <tr>
             <td><strong>${window.escapeHtml(t.name)}</strong>${masterBadge}</td>
             <td><code>${window.escapeHtml(t.email || '-')}</code></td>
             <td>
               <span class="badge badge-primary">${window.escapeHtml((t.plan_tier || 'starter').toUpperCase())}</span>
+              ${dedicatedBadge}
               <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">${daily}/j · ${monthly}/mois</div>
             </td>
             <td style="font-size:0.82rem;">
@@ -454,6 +555,9 @@ window.adminController = {
             <td>${statusBadge}</td>
             <td>
               <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button class="btn btn-secondary btn-xs" onclick="window.adminController.openEditDedicatedLinesModal('${t.id}')" title="Jere Liy Dedye Eksklizif">
+                  <i data-lucide="shield" class="icon-sm"></i> Liy
+                </button>
                 <button class="btn btn-secondary btn-xs" onclick="window.adminController.toggleTenantKeyVisibility('${t.id}')" title="Afficher/Masquer">
                   <i data-lucide="${isRevealed ? 'eye-off' : 'eye'}" class="icon-sm"></i>
                 </button>
@@ -484,6 +588,120 @@ window.adminController = {
       refreshLucideIcons();
     } catch (e) {
       console.warn('[Fetch Tenants Error]:', e);
+    }
+  },
+
+  openEditDedicatedLinesModal(tenantId) {
+    const t = this.tenantsList.find(x => x.id === tenantId);
+    if (!t) return;
+    this.editingDedicatedTenantId = tenantId;
+
+    document.getElementById('edit-dedicated-tenant-name').textContent = t.name;
+    const planEl = document.getElementById('edit-dedicated-tenant-plan');
+    planEl.textContent = (t.plan_tier || 'pro').toUpperCase();
+
+    const container = document.getElementById('edit-dedicated-lines-container');
+    const accounts = this.accountsList || [];
+    const currentLines = t.dedicated_account_indices || [];
+
+    if (accounts.length === 0) {
+      container.innerHTML = `<span style="font-size:0.8rem; color:var(--text-muted);">Aucune ligne WhatsApp connectée.</span>`;
+    } else {
+      container.innerHTML = accounts.map(a => {
+        const idx = a.account_index;
+        const otherTenant = this.tenantsList.find(other =>
+          other.id !== tenantId &&
+          Array.isArray(other.dedicated_account_indices) &&
+          other.dedicated_account_indices.includes(idx)
+        );
+        const isTakenByOther = Boolean(otherTenant);
+        const isChecked = currentLines.includes(idx);
+        const phone = a.phone_number ? `+${a.phone_number}` : 'Déconnecté';
+        const label = window.escapeHtml(a.label || `SIM ${idx}`);
+
+        if (isTakenByOther) {
+          return `
+            <label style="display:flex; align-items:center; gap:8px; font-size:0.83rem; color:var(--text-muted); opacity:0.6; cursor:not-allowed;">
+              <input type="checkbox" disabled>
+              <span><strong>Liy #${idx}</strong> (${label} · ${phone})</span>
+              <span class="badge badge-muted" style="font-size:0.68rem; margin-left:auto;">Dedye pou "${window.escapeHtml(otherTenant.name)}"</span>
+            </label>
+          `;
+        }
+
+        return `
+          <label style="display:flex; align-items:center; gap:8px; font-size:0.83rem; color:var(--text-main); cursor:pointer;">
+            <input type="checkbox" class="edit-dedicated-line-chk" value="${idx}" ${isChecked ? 'checked' : ''} onchange="window.adminController.handleEditLineSelectionChange();">
+            <span><strong>Liy #${idx}</strong> (${label} · ${phone})</span>
+            <span class="badge badge-success" style="font-size:0.68rem; margin-left:auto;">${isChecked ? 'Dedye Kounye a' : 'Disponib'}</span>
+          </label>
+        `;
+      }).join('');
+    }
+
+    this.handleEditLineSelectionChange();
+    openModal('modal-edit-dedicated-lines');
+    refreshLucideIcons();
+  },
+
+  handleEditLineSelectionChange() {
+    const t = this.tenantsList.find(x => x.id === this.editingDedicatedTenantId);
+    const plan = t?.plan_tier || 'pro';
+    const checked = Array.from(document.querySelectorAll('.edit-dedicated-line-chk:checked'));
+    const countEl = document.getElementById('edit-dedicated-count');
+
+    if (countEl) {
+      countEl.textContent = `${checked.length} / ${plan === 'pro' ? 2 : 'illimité'} seleksyone`;
+      countEl.style.color = (plan === 'pro' && checked.length > 2) ? 'var(--accent-danger)' : 'var(--text-muted)';
+    }
+
+    if (plan === 'pro') {
+      const allCheckboxes = Array.from(document.querySelectorAll('.edit-dedicated-line-chk'));
+      for (const cb of allCheckboxes) {
+        if (!cb.checked) {
+          cb.disabled = checked.length >= 2;
+        } else {
+          cb.disabled = false;
+        }
+      }
+    }
+  },
+
+  async saveTenantDedicatedLines() {
+    if (!this.editingDedicatedTenantId) return;
+    const btn = document.getElementById('btn-save-dedicated-lines');
+    const checked = Array.from(document.querySelectorAll('.edit-dedicated-line-chk:checked'))
+      .map(el => parseInt(el.value, 10))
+      .filter(i => Number.isInteger(i) && i > 0);
+
+    const t = this.tenantsList.find(x => x.id === this.editingDedicatedTenantId);
+    if (t?.plan_tier === 'pro' && checked.length > 2) {
+      alert('Plan Pro autorise au maximum 2 lignes dédiées exclusives.');
+      return;
+    }
+
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/api/v1/admin/tenants/${this.editingDedicatedTenantId}`, {
+        method: 'PATCH',
+        headers: this.getAdminHeaders(true),
+        body: JSON.stringify({
+          dedicated_account_indices: checked
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        closeModal('modal-edit-dedicated-lines');
+        await this.fetchTenantsList();
+        await this.fetchWhatsAppAccounts();
+        alert('Liy dedye yo anrejistre avèk siksè ! Tout mesaj antrepriz la ap pase sèlman sou liy sa yo.');
+      } else {
+        alert('Erreur: ' + (data.error || 'Impossible d’enregistrer'));
+      }
+    } catch (err) {
+      alert('Erreur réseau: ' + err.message);
+    } finally {
+      btn.disabled = false;
     }
   },
 
@@ -570,6 +788,7 @@ window.adminController = {
         headers: this.getAdminHeaders(false)
       });
       const data = await res.json();
+      this.accountsList = data.accounts || [];
       const container = document.getElementById('admin-accounts-grid');
       if (!container) return;
 

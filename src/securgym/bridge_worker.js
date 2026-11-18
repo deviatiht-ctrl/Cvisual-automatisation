@@ -864,7 +864,8 @@ class SecurGymBridgeWorker {
           await this.sanitizePendingOutbox(20);
         }
 
-        const acc = clusterManager.getPrimaryReadyAccount();
+        const allDedicated = await db.getAllDedicatedAccountIndices();
+        const acc = clusterManager.getPrimaryReadyAccount(allDedicated);
         if (acc && !acc.isBusy) {
           const res = await this._rest(
             'whatsapp_messages_outbox?status=eq.pending&kind=in.(receipt,welcome,otp,test,manual_direct)&order=created_at.asc&limit=1'
@@ -929,7 +930,8 @@ class SecurGymBridgeWorker {
         this._rolloverUtcDayIfNeeded();
         const now = Date.now();
 
-        const acc = clusterManager.getPrimaryReadyAccount();
+        const allDedicated = await db.getAllDedicatedAccountIndices();
+        const acc = clusterManager.getPrimaryReadyAccount(allDedicated);
         const effectiveSentToday = Math.max(this.sentRemindersToday, acc?.sentRemindersToday || 0);
         if (effectiveSentToday >= this.dailyReminderCap) {
           nextMs = 60000;

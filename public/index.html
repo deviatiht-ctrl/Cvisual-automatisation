@@ -1100,12 +1100,29 @@
         </div>
         <div style="margin-bottom:12px;">
           <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Forfait :</label>
-          <select id="create-key-plan">
+          <select id="create-key-plan" onchange="window.adminController.handleCreatePlanChange();">
             <option value="starter">Starter (15 / jour · 300 / mois)</option>
-            <option value="pro" selected>Pro Business (100 / jour · 3 000 / mois)</option>
-            <option value="enterprise">Enterprise (5 000 / jour · 100 000 / mois)</option>
+            <option value="pro" selected>Pro Business (100 / jour · 3 000 / mois • 1-2 Liy Dedye)</option>
+            <option value="enterprise">Enterprise (5 000 / jour · 100 000 / mois • Liy Dedye)</option>
           </select>
         </div>
+
+        <div id="create-key-dedicated-section" style="margin-bottom:14px; padding:12px; background:var(--bg-secondary); border-radius:8px; border:1px solid var(--border-color);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <label style="font-size:0.86rem; font-weight:700; color:var(--text-main);">
+              <i data-lucide="shield-check" class="icon-sm" style="color:var(--accent-primary); vertical-align:middle;"></i>
+              Liy WhatsApp Dedye Eksklizif (Plan Pro : 1 oswa 2 Liy)
+            </label>
+            <span id="create-key-dedicated-count" style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">0 / 2 seleksyone</span>
+          </div>
+          <p style="font-size:0.78rem; color:var(--text-muted); margin-bottom:10px;">
+            Liy sa yo ap rezève 100% pou antrepriz sa a. Okenn lòt mesaj oswa lòt gym pap ka janm pase sou yo !
+          </p>
+          <div id="create-key-lines-container" style="display:flex; flex-direction:column; gap:6px;">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+
         <div class="grid-2" style="gap:12px; margin-bottom:18px;">
           <div>
             <label style="display:block; font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">Quota Journalier :</label>
@@ -1168,6 +1185,44 @@
         <button type="button" id="btn-copy-ai-prompt-modal" class="btn btn-primary btn-sm" onclick="window.adminController.copyAiPromptFromModal();">
           <i data-lucide="copy" class="icon-sm"></i> Copier Tout le Prompt
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODALE: MODIFIER LIGNES DÉDIÉES ================= -->
+  <div id="modal-edit-dedicated-lines" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 style="font-size: 1.15rem; font-weight: 700;">Liy WhatsApp Dedye Eksklizif</h3>
+        <button class="modal-close" onclick="closeModal('modal-edit-dedicated-lines');">
+          <i data-lucide="x" class="icon-md"></i>
+        </button>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <p style="font-size:0.86rem; color:var(--text-muted); margin-bottom:4px;">
+          Antrepriz : <strong id="edit-dedicated-tenant-name" style="color:var(--text-main);"></strong>
+        </p>
+        <p style="font-size:0.8rem; color:var(--text-muted);">
+          Plan : <span id="edit-dedicated-tenant-plan" class="badge badge-primary">PRO</span> ·
+          Chwazi 1 oswa 2 liy dedye pou antrepriz sa a. Tout mesaj antrepriz la ap pase sèlman sou liy sa yo, epi okenn lòt mesaj pap ka pase sou yo.
+        </p>
+      </div>
+
+      <div id="edit-dedicated-lines-container" style="display:flex; flex-direction:column; gap:8px; margin-bottom:18px;">
+        <!-- Checkboxes rendered dynamically -->
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span id="edit-dedicated-count" style="font-size:0.82rem; color:var(--text-muted); font-weight:600;">0 / 2 seleksyone</span>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('modal-edit-dedicated-lines');">
+            Annuler
+          </button>
+          <button type="button" id="btn-save-dedicated-lines" class="btn btn-primary btn-sm" onclick="window.adminController.saveTenantDedicatedLines();">
+            <i data-lucide="save" class="icon-sm"></i> Anrejistre Liy Dedye
+          </button>
+        </div>
       </div>
     </div>
   </div>

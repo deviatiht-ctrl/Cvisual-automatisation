@@ -486,7 +486,22 @@ curl -s "${url}/api/v1/me" \\
 
 ---
 
-## 4. ENDPOINTS REST COMPLETS (/api/v1/*)
+## 4. PLAN PRO & ENTERPRISE : LIY DÉDIÉES EXCLUSIVES & IZOLASYON TOTAL (ZERO-LEAKAGE)
+
+- **Lignes Dédiées Exclusives** :
+  - Sur le **Plan Pro**, vous bénéficiez de **1 ou 2 lignes WhatsApp (cartes SIM)** exclusivement réservées à votre entreprise.
+  - Sur le **Plan Enterprise**, vous pouvez avoir des lignes dédiées sur mesure.
+- **Garantie d'Isolation Totale & Zéro Fuite (Strict Routing Isolation)** :
+  1. Tous les messages émis avec la clé API de votre entreprise sont routés **UNIQUEMENT** à travers vos lignes dédiées assignées.
+  2. **AUCUN AUTRE MESSAGE** (ni les relances ou reçus d'autres salles de sport/gyms, ni d'autres entreprises clientes, ni le trafic système global) ne passera JAMAIS par vos lignes dédiées ! Vos numéros sont strictement sanctuarisés.
+  3. Si vous avez 2 lignes dédiées (ex: Ligne #1 et Ligne #2) :
+     - Par défaut, laissez le champ \`account_index\` vide : le système sélectionne automatiquement la ligne dédiée la plus disponible (load-balancing intelligent).
+     - Ou spécifiez explicitement \`account_index: 1\` ou \`account_index: 2\` dans votre payload si vous souhaitez forcer un numéro précis.
+  4. Si vous tentez d'utiliser une ligne appartenant à une autre entreprise, la passerelle refuse la requête avec l'erreur HTTP \`403 DEDICATED_LINE_RESTRICTION\`.
+
+---
+
+## 5. ENDPOINTS REST COMPLETS (/api/v1/*)
 
 1. \`GET ${url}/health\` (public) -> État global serveur + lignes WhatsApp connectées.
 2. \`GET ${url}/api/v1/me\` -> Profil locataire, \`plan_tier\`, \`usage\` (\`sent_today\`, \`remaining_today\`, \`sent_this_month\`, \`remaining_month\`), \`active_lines_ready\`.

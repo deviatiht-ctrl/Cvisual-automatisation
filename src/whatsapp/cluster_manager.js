@@ -177,8 +177,18 @@ export class ClusterManager {
     return Array.from(this.accounts.values()).sort((a, b) => a.accountIndex - b.accountIndex);
   }
 
-  getPrimaryReadyAccount() {
-    const ready = this.getAllAccounts().filter(a => a.isReady());
+  getPrimaryReadyAccount(excludeIndices = [], allowedIndices = []) {
+    const excludeSet = new Set((excludeIndices || []).map(i => parseInt(i, 10)));
+    const allowedSet = (allowedIndices && allowedIndices.length > 0)
+      ? new Set(allowedIndices.map(i => parseInt(i, 10)))
+      : null;
+
+    const ready = this.getAllAccounts().filter(a => {
+      if (!a.isReady()) return false;
+      if (allowedSet && !allowedSet.has(a.accountIndex)) return false;
+      if (excludeSet.has(a.accountIndex)) return false;
+      return true;
+    });
     if (ready.length === 0) return null;
     ready.sort((a, b) => (a.lastSentAt || 0) - (b.lastSentAt || 0));
     return ready[0];
@@ -247,15 +257,28 @@ export class ClusterManager {
     pdfBase64 = null,
     pdfFileName = null,
     kind = 'test',
-    preferredAccountIndex = null
+    preferredAccountIndex = null,
+    allowedIndices = [],
+    excludeIndices = []
   }) {
     const cleanPhone = normalizePhoneDigits(to, config.securgym?.defaultCountryCode || '509');
     if (!cleanPhone || cleanPhone.length < 8) {
       throw new Error('Numéro destinataire invalide (minimum 8 chiffres).');
     }
 
+    const allowedSet = (allowedIndices && allowedIndices.length > 0)
+      ? new Set(allowedIndices.map(i => parseInt(i, 10)))
+      : null;
+    const excludeSet = new Set((excludeIndices || []).map(i => parseInt(i, 10)));
+
     const prefIdx = preferredAccountIndex ? parseInt(preferredAccountIndex, 10) : null;
     if (prefIdx !== null) {
+      if (allowedSet && !allowedSet.has(prefIdx)) {
+        throw new Error(`Liy WhatsApp #${prefIdx} pa nan lis liy dedye antrepriz ou a (Liy pèmèt: ${Array.from(allowedSet).join(', ')}).`);
+      }
+      if (excludeSet.has(prefIdx)) {
+        throw new Error(`Liy WhatsApp #${prefIdx} rezève eksklizivman pou yon lòt antrepriz.`);
+      }
       const target = this.getAccount(prefIdx);
       if (!target || !target.isReady()) {
         throw new Error(`Liy WhatsApp #${prefIdx} pa konekte oswa pa prè pou kounye a.`);
@@ -272,19 +295,32 @@ export class ClusterManager {
         }
         if (!target || !target.isReady()) break;
       } else {
-        const readyAccounts = this.getAllAccounts().filter(a => a.isReady() && !a.isBusy);
+        const readyAccounts = this.getAllAccounts().filter(a => {
+          if (!a.isReady() || a.isBusy) return false;
+          if (allowedSet && !allowedSet.has(a.accountIndex)) return false;
+          if (excludeSet.has(a.accountIndex)) return false;
+          return true;
+        });
         if (readyAccounts.length > 0) {
           readyAccounts.sort((a, b) => (a.lastSentAt || 0) - (b.lastSentAt || 0));
           chosen = readyAccounts[0];
           break;
         }
-        const anyReady = this.getAllAccounts().some(a => a.isReady());
+        const anyReady = this.getAllAccounts().some(a => {
+          if (!a.isReady()) return false;
+          if (allowedSet && !allowedSet.has(a.accountIndex)) return false;
+          if (excludeSet.has(a.accountIndex)) return false;
+          return true;
+        });
         if (!anyReady) break;
       }
       await new Promise(r => setTimeout(r, 500));
     }
 
     if (!chosen) {
+      if (allowedSet && allowedSet.size > 0) {
+        throw new Error(`Liy dedye antrepriz ou a (${Array.from(allowedSet).map(i => '#' + i).join(', ')}) pa pare oswa pa konekte pou voye mesaj kounye a.`);
+      }
       throw new Error('Okenn liy WhatsApp pa pare oswa konekte pou voye mesaj kounye a.');
     }
 
@@ -304,12 +340,18 @@ export class ClusterManager {
     };
   }
 
-  async selectFastLaneAccount(preferredAccountIndex = null) {
+  async selectFastLaneAccount(preferredAccountIndex = null, allowedIndices = [], excludeIndices = []) {
     const prefIdx = preferredAccountIndex ? parseInt(preferredAccountIndex, 10) : null;
+    const allowedSet = (allowedIndices && allowedIndices.length > 0)
+      ? new Set(allowedIndices.map(i => parseInt(i, 10)))
+      : null;
+    const excludeSet = new Set((excludeIndices || []).map(i => parseInt(i, 10)));
     const readyAccounts = [];
 
     for (const [idx, inst] of this.accounts.entries()) {
       if (prefIdx !== null && idx !== prefIdx) continue;
+      if (allowedSet && !allowedSet.has(idx)) continue;
+      if (excludeSet.has(idx)) continue;
       if (inst.isReady() && !inst.isBusy) {
         const dbAcc = await db.getAccountByIndex(idx);
         const lastMem = inst.lastSentAt || 0;
@@ -328,13 +370,19 @@ export class ClusterManager {
     return readyAccounts[0].instance;
   }
 
-  async selectSlowLaneAccount(preferredAccountIndex = null) {
+  async selectSlowLaneAccount(preferredAccountIndex = null, allowedIndices = [], excludeIndices = []) {
     const prefIdx = preferredAccountIndex ? parseInt(preferredAccountIndex, 10) : null;
+    const allowedSet = (allowedIndices && allowedIndices.length > 0)
+      ? new Set(allowedIndices.map(i => parseInt(i, 10)))
+      : null;
+    const excludeSet = new Set((excludeIndices || []).map(i => parseInt(i, 10)));
     const now = Date.now();
     const eligibleAccounts = [];
 
     for (const [idx, inst] of this.accounts.entries()) {
       if (prefIdx !== null && idx !== prefIdx) continue;
+      if (allowedSet && !allowedSet.has(idx)) continue;
+      if (excludeSet.has(idx)) continue;
       if (!inst.isReady() || inst.isBusy) continue;
 
       const dbAcc = await db.getAccountByIndex(idx);
@@ -379,7 +427,20 @@ export class ClusterManager {
     try {
       const msg = await db.fetchNextPendingFastLane();
       if (msg) {
-        const account = await this.selectFastLaneAccount(msg.assigned_account_index || null);
+        let allowed = [];
+        let excluded = [];
+        if (msg.tenant_id) {
+          const tenant = await db.getTenantById(msg.tenant_id);
+          if (tenant?.dedicated_account_indices && tenant.dedicated_account_indices.length > 0) {
+            allowed = tenant.dedicated_account_indices;
+          } else {
+            excluded = await db.getAllDedicatedAccountIndices();
+          }
+        } else {
+          excluded = await db.getAllDedicatedAccountIndices();
+        }
+
+        const account = await this.selectFastLaneAccount(msg.assigned_account_index || null, allowed, excluded);
         if (account) {
           await db.updateMessageStatus(msg.id, 'processing', {
             assignedAccountIndex: account.accountIndex
@@ -457,7 +518,20 @@ export class ClusterManager {
     try {
       const msg = await db.fetchNextPendingSlowLane();
       if (msg) {
-        const eligible = await this.selectSlowLaneAccount(msg.assigned_account_index || null);
+        let allowed = [];
+        let excluded = [];
+        if (msg.tenant_id) {
+          const tenant = await db.getTenantById(msg.tenant_id);
+          if (tenant?.dedicated_account_indices && tenant.dedicated_account_indices.length > 0) {
+            allowed = tenant.dedicated_account_indices;
+          } else {
+            excluded = await db.getAllDedicatedAccountIndices();
+          }
+        } else {
+          excluded = await db.getAllDedicatedAccountIndices();
+        }
+
+        const eligible = await this.selectSlowLaneAccount(msg.assigned_account_index || null, allowed, excluded);
         if (eligible) {
           const { instance } = eligible;
           const accountIndex = instance.accountIndex;

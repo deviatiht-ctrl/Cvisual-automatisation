@@ -26,9 +26,28 @@ window.getPublicGatewayUrl = function getPublicGatewayUrl() {
   return window.location.origin.replace(/\/+$/, '');
 };
 
-window.buildAiIntegrationPrompt = function buildAiIntegrationPrompt(baseUrl, apiKey) {
+window.buildAiIntegrationPrompt = function buildAiIntegrationPrompt(baseUrl, apiKey, options = {}) {
   const cleanUrl = (baseUrl || window.getPublicGatewayUrl()).replace(/\/+$/, '');
   const safeKey = apiKey && String(apiKey).trim() ? String(apiKey).trim() : '<VOTRE_CLE_API>';
+  const dedicatedLines = Array.isArray(options?.dedicatedLines)
+    ? options.dedicatedLines
+    : (Array.isArray(options?.dedicated_account_indices) ? options.dedicated_account_indices : []);
+  const planTier = (options?.planTier || options?.plan_tier || 'pro').toLowerCase();
+
+  const dedicatedSection = dedicatedLines.length > 0
+    ? `=== 2. LIY DÉDIÉES EXCLUSIVES & IZOLASYON TOTAL (PLAN ${(planTier || 'PRO').toUpperCase()}) ===
+- Ligne(s) réservée(s) : Ligne #${dedicatedLines.join(', #')} (Attribuée(s) exclusivement à votre entreprise)
+- GARANTIE D'ISOLATION STRICTE (ZERO-LEAKAGE) :
+  * Tous les messages envoyés avec cette clé API transitent UNIQUEMENT par vos lignes dédiées (#${dedicatedLines.join(', #')}).
+  * AUCUN message d'une autre entreprise, d'un autre gym ni de la plateforme générale ne passera JAMAIS par vos lignes. Vos cartes SIM sont 100% isolées.
+  * Routage intelligent : Laissez le champ "account_index" vide pour un équilibrage automatique entre vos lignes dédiées, ou forcez un numéro précis via "account_index": ${dedicatedLines[0]}.
+`
+    : (planTier === 'pro'
+      ? `=== 2. PLAN PRO : SUPPORT DES LIY DÉDIÉES EXCLUSIVES ===
+- Sur le Plan Pro, vous pouvez attacher 1 ou 2 lignes WhatsApp (SIM) dédiées exclusivement à votre entreprise.
+- Isolation stricte : lorsque configurées, aucun autre message de la plateforme n'emprunte vos lignes.
+`
+      : '');
 
   return `Tu dois intégrer l'API REST CVISUAL WhatsApp Gateway dans mon application / site web backend.
 
@@ -47,7 +66,7 @@ RÈGLE DE SÉCURITÉ OBLIGATOIRE :
 - Stocke la clé API côté serveur dans une variable d'environnement (.env : CVISUAL_WA_API_KEY=${safeKey}).
 - N'expose JAMAIS cette clé dans le code frontend navigateur (React/Vue/HTML public).
 
-=== 2. ROUTAGE DUAL-LANE & RÈGLES ANTI-BAN META ===
+${dedicatedSection}=== ${dedicatedSection ? '3' : '2'}. ROUTAGE DUAL-LANE & RÈGLES ANTI-BAN META ===
 1) FAST LANE (Instantané, ~2.5s à 6.5s, prioritaire, non bloqué par la limite 25/jour) :
    - kind autorisés : "receipt", "welcome", "otp", "test", "manual_direct"
    - mode="sync" -> HTTP 200 (envoi immédiat si la ligne WhatsApp est connectée, sinon 503 WHATSAPP_OFFLINE)

@@ -211,6 +211,7 @@ router.get('/me', authenticateApiKey, async (req, res) => {
 
     const dailyQuota = Number(req.tenant.daily_quota ?? 15);
     const monthlyQuota = Number(req.tenant.monthly_quota ?? 300);
+    const tenantDedicated = req.tenant.dedicated_account_indices || [];
 
     res.json({
       ok: true,
@@ -222,6 +223,8 @@ router.get('/me', authenticateApiKey, async (req, res) => {
         plan_tier: req.tenant.plan_tier,
         daily_quota: dailyQuota,
         monthly_quota: monthlyQuota,
+        dedicated_account_indices: tenantDedicated,
+        has_dedicated_lines: tenantDedicated.length > 0,
         is_active: req.tenant.is_active,
         created_at: req.tenant.created_at
       },
@@ -235,7 +238,15 @@ router.get('/me', authenticateApiKey, async (req, res) => {
       },
       cluster: {
         active_lines_ready: readyCount,
-        total_configured_lines: accounts.length
+        total_configured_lines: accounts.length,
+        dedicated_lines: tenantDedicated.map(idx => {
+          const acc = clusterManager.getAccount(idx);
+          return {
+            account_index: idx,
+            status: acc ? acc.status : 'DISCONNECTED',
+            ready: Boolean(acc && acc.isReady())
+          };
+        })
       },
       docs: {
         base_url: baseUrl,
@@ -450,6 +461,35 @@ router.post('/messages/send', authenticateApiKey, async (req, res) => {
       });
     }
 
+    const tenantDedicated = req.tenant?.dedicated_account_indices || [];
+    const hasDedicatedLines = tenantDedicated.length > 0;
+    const allDedicatedAcrossCluster = await db.getAllDedicatedAccountIndices(req.tenant.id);
+
+    let allowedIndices = [];
+    let excludeIndices = [];
+
+    if (hasDedicatedLines) {
+      allowedIndices = tenantDedicated;
+      if (preferredAccountIndex !== null) {
+        if (!tenantDedicated.includes(preferredAccountIndex)) {
+          return res.status(403).json({
+            ok: false,
+            code: 'DEDICATED_LINE_RESTRICTION',
+            error: `Liy WhatsApp #${preferredAccountIndex} pa fè pati liy dedye antrepriz ou a. Liy ou gen dwa itilize yo se: [${tenantDedicated.join(', ')}].`
+          });
+        }
+      }
+    } else {
+      excludeIndices = allDedicatedAcrossCluster;
+      if (preferredAccountIndex !== null && allDedicatedAcrossCluster.includes(preferredAccountIndex)) {
+        return res.status(403).json({
+          ok: false,
+          code: 'LINE_RESERVED_FOR_ANOTHER_TENANT',
+          error: `Liy WhatsApp #${preferredAccountIndex} rezève eksklizivman pou yon lòt antrepriz sou plan Pro/Enterprise.`
+        });
+      }
+    }
+
     if (reqMode === 'sync') {
       if (preferredAccountIndex !== null) {
         const target = clusterManager.getAccount(preferredAccountIndex);
@@ -460,11 +500,20 @@ router.post('/messages/send', authenticateApiKey, async (req, res) => {
             error: `WhatsApp line #${preferredAccountIndex} is not connected or ready right now.`
           });
         }
-      } else if (!clusterManager.getPrimaryReadyAccount()) {
+      } else if (hasDedicatedLines) {
+        const anyReady = tenantDedicated.some(idx => clusterManager.getAccount(idx)?.isReady());
+        if (!anyReady) {
+          return res.status(503).json({
+            ok: false,
+            code: 'WHATSAPP_OFFLINE',
+            error: `Liy dedye antrepriz ou a (#${tenantDedicated.join(', #')}) pa konekte oswa pa prè pou kounye a.`
+          });
+        }
+      } else if (!clusterManager.getPrimaryReadyAccount(excludeIndices)) {
         return res.status(503).json({
           ok: false,
           code: 'WHATSAPP_OFFLINE',
-          error: 'No WhatsApp line is currently connected for synchronous delivery. Use mode="async" to queue the message.'
+          error: 'No shared WhatsApp line is currently connected for synchronous delivery. Use mode="async" to queue the message.'
         });
       }
 
@@ -475,7 +524,9 @@ router.post('/messages/send', authenticateApiKey, async (req, res) => {
           pdfBase64: pdfValidation.base64,
           pdfFileName: pdfValidation.fileName,
           kind: messageKind,
-          preferredAccountIndex
+          preferredAccountIndex,
+          allowedIndices,
+          excludeIndices
         });
 
         const sentAt = new Date().toISOString();
@@ -562,6 +613,15 @@ router.post('/messages/send', authenticateApiKey, async (req, res) => {
     }
 
     // Async queue delivery (default)
+    let assignIndex = preferredAccountIndex;
+    if (!assignIndex && hasDedicatedLines) {
+      const readyOne = tenantDedicated.find(idx => {
+        const acc = clusterManager.getAccount(idx);
+        return acc && acc.isReady() && !acc.isBusy;
+      });
+      assignIndex = readyOne || tenantDedicated[0];
+    }
+
     const outboxMessage = await db.enqueueMessage({
       tenantId: req.tenant.id,
       toPhone: cleanedTo,
@@ -569,7 +629,7 @@ router.post('/messages/send', authenticateApiKey, async (req, res) => {
       pdfBase64: pdfValidation.base64,
       pdfFileName: pdfValidation.fileName,
       kind: messageKind,
-      assignedAccountIndex: preferredAccountIndex
+      assignedAccountIndex: assignIndex
     });
 
     const responseBody = {
@@ -579,7 +639,7 @@ router.post('/messages/send', authenticateApiKey, async (req, res) => {
       lane: isFastLane ? 'fast_lane' : 'slow_lane',
       kind: messageKind,
       recipient: cleanedTo,
-      account_index: preferredAccountIndex,
+      account_index: assignIndex,
       has_pdf: Boolean(pdfValidation.base64),
       note: isFastLane
         ? 'Message sent to Fast Lane for immediate organic delivery.'
@@ -614,6 +674,10 @@ router.post('/messages/send-bulk', authenticateApiKey, async (req, res) => {
         error: 'Maximum 100 messages allowed per /messages/send-bulk request.'
       });
     }
+
+    const tenantDedicated = req.tenant?.dedicated_account_indices || [];
+    const hasDedicatedLines = tenantDedicated.length > 0;
+    const allDedicatedAcrossCluster = await db.getAllDedicatedAccountIndices(req.tenant.id);
 
     const prepared = [];
     const errors = [];
@@ -650,6 +714,29 @@ router.post('/messages/send-bulk', authenticateApiKey, async (req, res) => {
           continue;
         }
         accIdx = parsedIdx;
+      }
+
+      if (hasDedicatedLines) {
+        if (accIdx !== null && !tenantDedicated.includes(accIdx)) {
+          errors.push({
+            index: i,
+            code: 'DEDICATED_LINE_RESTRICTION',
+            error: `Liy WhatsApp #${accIdx} pa nan lis liy dedye antrepriz ou a (${tenantDedicated.join(', ')}).`
+          });
+          continue;
+        }
+        if (accIdx === null) {
+          accIdx = tenantDedicated[0];
+        }
+      } else {
+        if (accIdx !== null && allDedicatedAcrossCluster.includes(accIdx)) {
+          errors.push({
+            index: i,
+            code: 'LINE_RESERVED_FOR_ANOTHER_TENANT',
+            error: `Liy WhatsApp #${accIdx} rezève eksklizivman pou yon lòt antrepriz.`
+          });
+          continue;
+        }
       }
 
       const pdfCheck = validateAndCleanPdf(
@@ -1274,7 +1361,8 @@ router.post('/admin/api-keys', requireAdmin, async (req, res) => {
       plan_tier = 'pro',
       daily_quota,
       monthly_quota,
-      is_active = true
+      is_active = true,
+      dedicated_account_indices = []
     } = req.body || {};
 
     if (!name || !String(name).trim()) {
@@ -1305,6 +1393,26 @@ router.post('/admin/api-keys', requireAdmin, async (req, res) => {
       });
     }
 
+    const rawIndices = Array.isArray(dedicated_account_indices) ? dedicated_account_indices : [];
+    const cleanIndices = rawIndices
+      .map(i => parseInt(i, 10))
+      .filter(i => Number.isInteger(i) && i > 0);
+
+    if (cleanPlan === 'pro' && cleanIndices.length > 2) {
+      return res.status(400).json({
+        ok: false,
+        code: 'INVALID_DEDICATED_LINES',
+        error: 'Le Plan Pro autorise au maximum 2 lignes dédiées exclusives.'
+      });
+    }
+    if (cleanPlan === 'starter' && cleanIndices.length > 0) {
+      return res.status(400).json({
+        ok: false,
+        code: 'INVALID_DEDICATED_LINES',
+        error: 'Le Plan Starter ne supporte pas de lignes dédiées (disponible sur Plan Pro et Enterprise).'
+      });
+    }
+
     const tenant = await db.createTenant({
       userId: null,
       name: String(name).trim(),
@@ -1312,7 +1420,8 @@ router.post('/admin/api-keys', requireAdmin, async (req, res) => {
       planTier: cleanPlan,
       dailyQuota: parsedDaily,
       monthlyQuota: parsedMonthly,
-      isActive: Boolean(is_active)
+      isActive: Boolean(is_active),
+      dedicatedAccountIndices: cleanIndices
     });
 
     res.status(201).json({
@@ -1468,6 +1577,26 @@ router.patch('/admin/tenants/:id', requireAdmin, async (req, res) => {
     }
     if (is_active !== undefined) {
       updates.is_active = Boolean(is_active);
+    }
+    if (req.body.dedicated_account_indices !== undefined) {
+      const raw = Array.isArray(req.body.dedicated_account_indices) ? req.body.dedicated_account_indices : [];
+      const cleanIndices = raw.map(i => parseInt(i, 10)).filter(i => Number.isInteger(i) && i > 0);
+      const effectivePlan = updates.plan_tier || existing.plan_tier;
+      if (effectivePlan === 'pro' && cleanIndices.length > 2) {
+        return res.status(400).json({
+          ok: false,
+          code: 'INVALID_DEDICATED_LINES',
+          error: 'Le Plan Pro autorise au maximum 2 lignes dédiées exclusives.'
+        });
+      }
+      if (effectivePlan === 'starter' && cleanIndices.length > 0) {
+        return res.status(400).json({
+          ok: false,
+          code: 'INVALID_DEDICATED_LINES',
+          error: 'Le Plan Starter ne supporte pas de lignes dédiées.'
+        });
+      }
+      updates.dedicated_account_indices = cleanIndices;
     }
 
     const updated = await db.updateTenant(id, updates);
