@@ -107,10 +107,12 @@ function detectMessageMeta(messageObj) {
 }
 
 export class WhatsAppAccountInstance extends EventEmitter {
-  constructor(accountIndex, label = `Liy ${accountIndex}`) {
+  constructor(accountIndex, label = `Liy ${accountIndex}`, options = {}) {
     super();
     this.accountIndex = parseInt(accountIndex, 10);
     this.label = label;
+    this.tenantId = options.tenantId || null;
+    this.tenantName = options.tenantName || null;
     this.sock = null;
     this.client = null; // Alias kept for diagnostics
     this.status = 'DISCONNECTED';
@@ -810,9 +812,44 @@ export class WhatsAppAccountInstance extends EventEmitter {
     }
   }
 
-  async sendMessage({ to, text, pdfBase64 = null, pdfFileName = null, kind = 'receipt' }) {
+  async sendMessage({
+    to,
+    text,
+    pdfBase64 = null,
+    pdfFileName = null,
+    kind = 'receipt',
+    callerTenantId = null,
+    callerSource = null
+  }) {
     if (!this.isReady()) {
       throw new Error(`Liy SIM ${this.accountIndex} pa prè (Estati: ${this.status})`);
+    }
+
+    // 🛡️ ZERO-LEAKAGE HARD FIREWALL:
+    // If this line is dedicated to a tenant (e.g. Line 3 DALIGHT):
+    const isLine3 = this.accountIndex === 3;
+    const isDedicatedLine = isLine3 || Boolean(this.tenantId);
+
+    if (isDedicatedLine) {
+      const textContent = String(text || '');
+      const isSecurgymMessage =
+        callerSource === 'securgym' ||
+        /JL FITNESS|SecurGYM|securgym\.com|Abonnement Expiré|Abònman Ekspire|Dernier Jour/i.test(textContent);
+
+      if (isSecurgymMessage) {
+        console.error(
+          `[CRITICAL FIREWALL] Blocked SecurGYM/JL FITNESS message from sending on Dedicated Line ${this.accountIndex} (${this.label})!`
+        );
+        throw new Error(
+          `SECURITY_FIREWALL_BLOCK: Liy ${this.accountIndex} (${this.label}) se yon liy 100% prive pou tenant ${this.tenantName || this.tenantId || 'DALIGHT'}. Mesaj JL FITNESS oswa SecurGYM pa gen dwa pase sou li.`
+        );
+      }
+
+      if (callerTenantId && this.tenantId && callerTenantId !== this.tenantId) {
+        throw new Error(
+          `SECURITY_FIREWALL_BLOCK: Liy ${this.accountIndex} rezève sèlman pou tenant ${this.tenantId}.`
+        );
+      }
     }
 
     const cleanNumber = normalizePhoneDigits(to, config.securgym?.defaultCountryCode || '509');
@@ -974,10 +1011,17 @@ export class WhatsAppAccountInstance extends EventEmitter {
     return list.slice(-maxCount);
   }
 
-  async sendDirectChatMessage(rawChatId, message) {
+  async sendDirectChatMessage(rawChatId, message, callerSource = null) {
     if (!this.isReady()) {
       throw new Error(`La ligne ${this.accountIndex} n'est pas connectée (Statut: ${this.status}).`);
     }
+
+    if ((this.accountIndex === 3 || this.tenantId) && callerSource === 'securgym') {
+      throw new Error(
+        `SECURITY_FIREWALL_BLOCK: Liy ${this.accountIndex} rezève sèlman pou tenant ${this.tenantName || this.tenantId || 'DALIGHT'}. Aksyon SecurGYM pa otorize sou li.`
+      );
+    }
+
     const cid = this._normalizeChatId(rawChatId);
     if (!cid) throw new Error('Numéro destinataire invalide.');
     const cleanText = String(message || '').trim();

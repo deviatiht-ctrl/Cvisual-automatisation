@@ -326,6 +326,8 @@ class SecurGymBridgeWorker {
 
   attachAccountListeners(acc) {
     if (!acc || acc._securgymBridgeHooked) return;
+    // 🛡️ STRICT ISOLATION: SecurGYM bridge worker must NEVER hook, listen to, or manage Line 3 or dedicated tenant lines
+    if (acc.accountIndex === 3 || acc.tenantId) return;
     acc._securgymBridgeHooked = true;
     const pushSoon = () => {
       setTimeout(() => this.syncAndHeartbeat(), 250);
@@ -426,6 +428,8 @@ class SecurGymBridgeWorker {
 
     try {
       const managedIdx = this.getAccountIndex();
+      const allDedicated = await db.getAllDedicatedAccountIndices().catch(() => []);
+      const dedicatedSet = new Set([...allDedicated, 3]);
 
       // 1. Poll platform_whatsapp_accounts FIRST so Web commands are never clobbered
       const listRes = await this._rest('platform_whatsapp_accounts?order=account_index.asc');
@@ -434,6 +438,16 @@ class SecurGymBridgeWorker {
 
         for (const row of Array.isArray(rows) ? rows : []) {
           const idx = row.account_index;
+
+          // 🛡️ ZERO-LEAKAGE: Dedicated tenant lines (Line 3 DALIGHT) MUST NEVER exist or be managed in SecurGYM DB!
+          if (dedicatedSet.has(idx) || idx === 3) {
+            // Delete rogue row if present so SecurGYM dashboard NEVER sees DALIGHT line
+            await this._rest(`platform_whatsapp_accounts?account_index=eq.${idx}`, {
+              method: 'DELETE'
+            }).catch(() => {});
+            continue;
+          }
+
           const remoteStatus = String(row.service_status || '').toUpperCase();
           let acc = clusterManager.getAccount(idx);
 
@@ -480,6 +494,7 @@ class SecurGymBridgeWorker {
         // Clean stale other lines that aren't spawned on this cloud worker
         const activeIndices = new Set(clusterManager.getAllAccounts().map(a => a.accountIndex));
         for (const r of Array.isArray(rows) ? rows : []) {
+          if (dedicatedSet.has(r.account_index) || r.account_index === 3) continue;
           if (activeIndices.has(r.account_index)) continue;
           const st = String(r.service_status || '').toUpperCase();
           const hbMs = r.last_heartbeat ? new Date(r.last_heartbeat).getTime() : 0;
@@ -504,10 +519,13 @@ class SecurGymBridgeWorker {
         }
       }
 
-      const activeAccounts = clusterManager.getAllAccounts();
-      if (activeAccounts.length === 0) return;
+      // 🛡️ CRITICAL: ONLY report heartbeat for SecurGYM's accounts.
+      // Strictly filter out ANY dedicated tenant account, Line 3, or tenant-owned accounts!
+      const securgymAccounts = clusterManager
+        .getAllAccounts()
+        .filter(a => !dedicatedSet.has(a.accountIndex) && a.accountIndex !== 3 && !a.tenantId);
 
-      for (const acc of activeAccounts) {
+      for (const acc of securgymAccounts) {
         this.attachAccountListeners(acc);
         const status = acc.status || 'DISCONNECTED';
         const qrPayload = status === 'SCAN_QR' ? (acc.qrCodeDataUrl || acc.rawQrCode || null) : null;
@@ -525,8 +543,8 @@ class SecurGymBridgeWorker {
       }
 
       const queueLength = await this._countPendingOutbox();
-      const readyRep = activeAccounts.find(a => a.isReady());
-      const primaryAcc = readyRep || clusterManager.getAccount(managedIdx) || activeAccounts[0];
+      const readyRep = securgymAccounts.find(a => a.isReady());
+      const primaryAcc = readyRep || clusterManager.getAccount(managedIdx) || securgymAccounts[0];
       const globalStatus = readyRep ? 'READY' : (primaryAcc?.status || 'DISCONNECTED');
       const globalQr = globalStatus === 'SCAN_QR' ? (primaryAcc?.qrCodeDataUrl || primaryAcc?.rawQrCode || null) : null;
 
@@ -864,8 +882,10 @@ class SecurGymBridgeWorker {
           await this.sanitizePendingOutbox(20);
         }
 
-        const allDedicated = await db.getAllDedicatedAccountIndices();
-        const acc = clusterManager.getPrimaryReadyAccount(allDedicated);
+        const allDedicated = await db.getAllDedicatedAccountIndices().catch(() => []);
+        const dedicatedSet = new Set([...allDedicated, 3]);
+        const securgymAllowed = [this.getAccountIndex(), 2].filter(i => !dedicatedSet.has(i));
+        const acc = clusterManager.getPrimaryReadyAccount(Array.from(dedicatedSet), securgymAllowed);
         if (acc && !acc.isBusy) {
           const res = await this._rest(
             'whatsapp_messages_outbox?status=eq.pending&kind=in.(receipt,welcome,otp,test,manual_direct)&order=created_at.asc&limit=1'
@@ -886,7 +906,8 @@ class SecurGymBridgeWorker {
                     text: check.message || row.message,
                     pdfBase64: row.pdf_base64,
                     pdfFileName: row.pdf_file_name,
-                    kind: check.effectiveKind
+                    kind: check.effectiveKind,
+                    callerSource: 'securgym'
                   });
 
                   this.sentFastToday++;
@@ -930,8 +951,10 @@ class SecurGymBridgeWorker {
         this._rolloverUtcDayIfNeeded();
         const now = Date.now();
 
-        const allDedicated = await db.getAllDedicatedAccountIndices();
-        const acc = clusterManager.getPrimaryReadyAccount(allDedicated);
+        const allDedicated = await db.getAllDedicatedAccountIndices().catch(() => []);
+        const dedicatedSet = new Set([...allDedicated, 3]);
+        const securgymAllowed = [this.getAccountIndex(), 2].filter(i => !dedicatedSet.has(i));
+        const acc = clusterManager.getPrimaryReadyAccount(Array.from(dedicatedSet), securgymAllowed);
         const effectiveSentToday = Math.max(this.sentRemindersToday, acc?.sentRemindersToday || 0);
         if (effectiveSentToday >= this.dailyReminderCap) {
           nextMs = 60000;
@@ -965,7 +988,8 @@ class SecurGymBridgeWorker {
                         text: check.message || row.message,
                         pdfBase64: row.pdf_base64,
                         pdfFileName: row.pdf_file_name,
-                        kind: check.effectiveKind
+                        kind: check.effectiveKind,
+                        callerSource: 'securgym'
                       });
 
                       this.sentRemindersToday = Math.max(this.sentRemindersToday + 1, acc.sentRemindersToday || 0);
@@ -1044,9 +1068,15 @@ class SecurGymBridgeWorker {
 
       for (const cmd of rows) {
         try {
-          const acc = clusterManager.getAccount(cmd.account_index || this.getAccountIndex()) || clusterManager.getPrimaryReadyAccount();
+          const cmdIdx = parseInt(cmd.account_index || this.getAccountIndex(), 10);
+          const allDedicated = await db.getAllDedicatedAccountIndices().catch(() => []);
+          const dedicatedSet = new Set([...allDedicated, 3]);
+          if (dedicatedSet.has(cmdIdx) || cmdIdx === 3) {
+            throw new Error(`Aksè refize: Liy ${cmdIdx} se yon liy san pour san prive pou DALIGHT. SecurGYM pa ka itilize li.`);
+          }
+          const acc = clusterManager.getAccount(cmdIdx);
           if (!acc || !acc.isReady()) {
-            throw new Error(`Liy ${cmd.account_index || this.getAccountIndex()} pa konekte pou kounye a.`);
+            throw new Error(`Liy ${cmdIdx} pa konekte pou kounye a.`);
           }
           const payload = cmd.payload && typeof cmd.payload === 'object' ? cmd.payload : {};
           let result;
@@ -1055,7 +1085,7 @@ class SecurGymBridgeWorker {
           } else if (cmd.action === 'get_messages') {
             result = { messages: await acc.getChatMessages(payload.chatId || '', payload.limit || 50) };
           } else if (cmd.action === 'send_chat') {
-            result = { message: await acc.sendDirectChatMessage(payload.chatId || '', payload.message || '') };
+            result = { message: await acc.sendDirectChatMessage(payload.chatId || '', payload.message || '', 'securgym') };
           } else {
             throw new Error(`Aksyon enkoni: ${cmd.action}`);
           }

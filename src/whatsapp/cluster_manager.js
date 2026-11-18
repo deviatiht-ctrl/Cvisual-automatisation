@@ -122,7 +122,12 @@ export class ClusterManager {
     for (const acc of toStart) {
       const idx = parseInt(acc.account_index, 10);
       if (!this.accounts.has(idx) && this.accounts.size < config.maxConcurrentAccounts) {
-        const inst = new WhatsAppAccountInstance(idx, acc.label || `Liy ${idx}`);
+        const inst = new WhatsAppAccountInstance(idx, acc.label || `Liy ${idx}`, {
+          tenantId: acc.tenant_id || null,
+          tenantName: acc.tenant_name || null
+        });
+        inst.tenantId = acc.tenant_id || null;
+        inst.tenantName = acc.tenant_name || null;
         this.accounts.set(idx, inst);
         registered.push(inst);
       }
@@ -158,7 +163,13 @@ export class ClusterManager {
       return null;
     }
 
-    const instance = new WhatsAppAccountInstance(idx, label || `Liy ${idx}`);
+    const dbAcc = await db.getAccountByIndex(idx).catch(() => null);
+    const instance = new WhatsAppAccountInstance(idx, label || dbAcc?.label || `Liy ${idx}`, {
+      tenantId: dbAcc?.tenant_id || null,
+      tenantName: dbAcc?.tenant_name || null
+    });
+    instance.tenantId = dbAcc?.tenant_id || null;
+    instance.tenantName = dbAcc?.tenant_name || null;
     this.accounts.set(idx, instance);
 
     instance.initialize({ userTriggered }).catch(err => {
@@ -187,6 +198,8 @@ export class ClusterManager {
       if (!a.isReady()) return false;
       if (allowedSet && !allowedSet.has(a.accountIndex)) return false;
       if (excludeSet.has(a.accountIndex)) return false;
+      // 🛡️ CRITICAL: If no explicit allowedSet was passed, NEVER allow dedicated tenant lines or Line 3 into the shared pool!
+      if (!allowedSet && (a.tenantId || a.accountIndex === 3)) return false;
       return true;
     });
     if (ready.length === 0) return null;
@@ -351,6 +364,8 @@ export class ClusterManager {
     for (const [idx, inst] of this.accounts.entries()) {
       if (prefIdx !== null && idx !== prefIdx) continue;
       if (allowedSet && !allowedSet.has(idx)) continue;
+      // 🛡️ CRITICAL: If no explicit allowedSet was passed, dedicated lines (Line 3 / tenant lines) CANNOT take shared messages!
+      if (!allowedSet && (inst.tenantId || inst.accountIndex === 3)) continue;
       if (excludeSet.has(idx)) continue;
       if (inst.isReady() && !inst.isBusy) {
         const dbAcc = await db.getAccountByIndex(idx);
@@ -382,6 +397,8 @@ export class ClusterManager {
     for (const [idx, inst] of this.accounts.entries()) {
       if (prefIdx !== null && idx !== prefIdx) continue;
       if (allowedSet && !allowedSet.has(idx)) continue;
+      // 🛡️ CRITICAL: If no explicit allowedSet was passed, dedicated lines (Line 3 / tenant lines) CANNOT take shared messages!
+      if (!allowedSet && (inst.tenantId || inst.accountIndex === 3)) continue;
       if (excludeSet.has(idx)) continue;
       if (!inst.isReady() || inst.isBusy) continue;
 
