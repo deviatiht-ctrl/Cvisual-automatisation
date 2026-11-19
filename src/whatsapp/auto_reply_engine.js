@@ -63,8 +63,9 @@ export function isGroupOrBroadcastMessage(msg) {
     return true;
   }
 
-  // 3. Must be a direct user JID
-  if (!rawJid.endsWith('@s.whatsapp.net')) {
+  // 3. Must be a direct individual client JID (@s.whatsapp.net or @lid)
+  const isDirectClient = rawJid.endsWith('@s.whatsapp.net') || rawJid.endsWith('@lid');
+  if (!isDirectClient) {
     return true;
   }
 
@@ -453,7 +454,7 @@ export async function handleIncomingMessageAutoReply({ accountInstance, sock, me
         botSentMessageIds.delete(msg.key.id);
         continue;
       }
-      if (rawRemoteJid.endsWith('@s.whatsapp.net') && isRecentRealtime) {
+      if ((rawRemoteJid.endsWith('@s.whatsapp.net') || rawRemoteJid.endsWith('@lid')) && isRecentRealtime) {
         const clientUser = jidNormalizedUser(rawRemoteJid);
         const clientPhone = clientUser.split('@')[0].replace(/\D/g, '');
         if (clientPhone) {
