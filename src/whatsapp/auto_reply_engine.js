@@ -11,7 +11,22 @@ const senderCooldowns = new Map();
 const conversationMemory = new Map();
 
 // Human takeover tracker: senderPhone -> timestamp (ms) when a human manager sent a message to this client
-const humanActiveChats = new Map();
+export const humanActiveChats = new Map();
+
+// Ring buffer of recent auto-reply actions & decisions for live diagnostics
+export const recentAutoReplyEvents = [];
+
+export function logAutoReplyEvent(evt) {
+  recentAutoReplyEvents.unshift({
+    timestamp: new Date().toISOString(),
+    ...evt
+  });
+  if (recentAutoReplyEvents.length > 80) recentAutoReplyEvents.pop();
+}
+
+export function clearHumanActiveChats() {
+  humanActiveChats.clear();
+}
 
 // Candidate Gemini models with automatic failover (handles 429 quota exhaustion gracefully)
 const GEMINI_MODELS = [
@@ -374,7 +389,6 @@ RÈG POU REPONS YO :
  * Dispatches an Auto-Reply to an incoming Baileys message if applicable.
  */
 export async function handleIncomingMessageAutoReply({ accountInstance, sock, messages, type }) {
-  if (type !== 'notify') return;
   if (!Array.isArray(messages) || messages.length === 0) return;
 
   const accountIndex = accountInstance.accountIndex;
@@ -417,15 +431,19 @@ export async function handleIncomingMessageAutoReply({ accountInstance, sock, me
     const rawRemoteJid = msg.key?.remoteJid;
     if (!rawRemoteJid) continue;
 
+    const msgTs = Number(msg.messageTimestamp?.low ?? msg.messageTimestamp ?? nowSec);
+    const isRecentRealtime = Math.abs(nowSec - msgTs) <= 45;
+
     // 🌟 1. HUMAN TAKEOVER DETECTION (FromMe === true)
-    // If the human manager is sending a message from their phone to a client, record it and PAUSE AI!
+    // ONLY pause AI if the message was sent RIGHT NOW in real-time, NEVER for historical sync messages!
     if (msg.key?.fromMe) {
-      if (rawRemoteJid.endsWith('@s.whatsapp.net')) {
+      if (rawRemoteJid.endsWith('@s.whatsapp.net') && isRecentRealtime) {
         const clientUser = jidNormalizedUser(rawRemoteJid);
         const clientPhone = clientUser.split('@')[0].replace(/\D/g, '');
         if (clientPhone) {
           humanActiveChats.set(clientPhone, now);
-          console.log(`[AutoReply Concierge] Human manager replied to +${clientPhone}. AI auto-reply paused for 60m.`);
+          logAutoReplyEvent({ action: 'HUMAN_TAKEOVER_RECORDED', clientPhone });
+          console.log(`[AutoReply Concierge] Human manager replied to +${clientPhone}. AI auto-reply paused for 15m.`);
         }
       }
       continue;
@@ -443,19 +461,24 @@ export async function handleIncomingMessageAutoReply({ accountInstance, sock, me
 
     // Never reply if the sender is strictly the account's own phone number
     const lineOwnPhone = (accountInstance.phoneNumber || accountDb?.phone_number || '').replace(/\D/g, '');
-    if (lineOwnPhone && senderPhone === lineOwnPhone) continue;
+    if (lineOwnPhone && senderPhone === lineOwnPhone) {
+      logAutoReplyEvent({ action: 'IGNORED_OWN_PHONE', senderPhone, lineOwnPhone });
+      continue;
+    }
 
     // 🌟 3. HUMAN TAKEOVER CHECK
-    // If a human manager replied to this customer within the last 60 minutes, STAND DOWN!
+    // If a human manager replied to this customer within the last 15 minutes, STAND DOWN!
     const lastHumanReplyAt = humanActiveChats.get(senderPhone) || 0;
-    if (now - lastHumanReplyAt < 60 * 60 * 1000) {
-      console.log(`[AutoReply Concierge] Chat with +${senderPhone} is currently handled by human (${Math.round((now - lastHumanReplyAt) / 60000)}m ago). AI stands down.`);
+    if (now - lastHumanReplyAt < 15 * 60 * 1000) {
+      const minutesAgo = Math.round((now - lastHumanReplyAt) / 60000);
+      logAutoReplyEvent({ action: 'IGNORED_HUMAN_ACTIVE', senderPhone, minutesAgo });
+      console.log(`[AutoReply Concierge] Chat with +${senderPhone} is currently handled by human (${minutesAgo}m ago). AI stands down.`);
       continue;
     }
 
     // Check message age: ignore old replayed messages (> 180s)
-    const msgTs = Number(msg.messageTimestamp?.low ?? msg.messageTimestamp ?? nowSec);
     if (msgTs > 0 && nowSec - msgTs > 180) {
+      logAutoReplyEvent({ action: 'IGNORED_OLD_TIMESTAMP', senderPhone, msgTs, nowSec, diffSec: nowSec - msgTs });
       continue;
     }
 
@@ -473,13 +496,15 @@ export async function handleIncomingMessageAutoReply({ accountInstance, sock, me
     if (!text || text.trim().length === 0) continue;
 
     if (!isAutoReplyEnabled) {
+      logAutoReplyEvent({ action: 'IGNORED_AUTOREPLY_DISABLED', senderPhone, text });
       continue;
     }
 
-    // Rate-limiting / anti-burst debounce: 2.5 seconds to prevent packet bounce
+    // Rate-limiting / anti-burst debounce: 2.0 seconds to prevent packet bounce
     const lastSenderMsgAt = senderCooldowns.get(senderPhone) || 0;
-    const minDebounceMs = isDalight ? 2500 : 5000;
+    const minDebounceMs = isDalight ? 2000 : 5000;
     if (now - lastSenderMsgAt < minDebounceMs) {
+      logAutoReplyEvent({ action: 'IGNORED_RAPID_BOUNCE', senderPhone, text });
       console.log(`[AutoReply Engine] Line ${accountIndex}: Rapid packet bounce throttled for +${senderPhone}`);
       continue;
     }
@@ -495,6 +520,7 @@ export async function handleIncomingMessageAutoReply({ accountInstance, sock, me
 
       // If aiResult is null (closure message like 'ok merci', or irrelevant message), DO NOT REPLY!
       if (!aiResult || !aiResult.text) {
+        logAutoReplyEvent({ action: 'IGNORED_SILENCE_NEEDED', senderPhone, text });
         console.log(`[AutoReply Concierge] No reply needed for message: "${text.trim()}". Staying silent.`);
         continue;
       }
@@ -516,9 +542,22 @@ export async function handleIncomingMessageAutoReply({ accountInstance, sock, me
     // Send the Auto-Reply
     try {
       console.log(`[AutoReply Concierge] [Line ${accountIndex}] 🤖 Sending AI reply to +${senderPhone}...`);
-      const sent = await sock.sendMessage(remoteJid, { text: replyText }, { quoted: msg });
+      let sent;
+      try {
+        sent = await sock.sendMessage(remoteJid, { text: replyText }, { quoted: msg });
+      } catch (quoteErr) {
+        console.warn(`[AutoReply Concierge] Quoted reply failed, sending direct text:`, quoteErr.message);
+        sent = await sock.sendMessage(remoteJid, { text: replyText });
+      }
 
       senderCooldowns.set(senderPhone, now);
+      logAutoReplyEvent({
+        action: 'REPLIED',
+        senderPhone,
+        text,
+        replyPreview: replyText.slice(0, 100),
+        isBooking: Boolean(alertRecipient)
+      });
 
       // Record sent reply in account's in-memory messages store
       if (sent?.key?.id) {
@@ -540,6 +579,7 @@ export async function handleIncomingMessageAutoReply({ accountInstance, sock, me
         });
       }
     } catch (sendErr) {
+      logAutoReplyEvent({ action: 'SEND_ERROR', senderPhone, error: sendErr.message });
       console.error(`[AutoReply Concierge] Error sending reply to +${senderPhone} on Line ${accountIndex}:`, sendErr.message);
     }
   }

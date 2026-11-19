@@ -2,7 +2,12 @@ import express from 'express';
 import { db } from '../database.js';
 import { clusterManager, deliverWebhook } from '../whatsapp/cluster_manager.js';
 import { normalizePhoneDigits } from '../whatsapp/account_instance.js';
-import { DALIGHT_CONCIERGE_CONFIG } from '../whatsapp/auto_reply_engine.js';
+import {
+  DALIGHT_CONCIERGE_CONFIG,
+  recentAutoReplyEvents,
+  humanActiveChats,
+  clearHumanActiveChats
+} from '../whatsapp/auto_reply_engine.js';
 import {
   authenticateApiKey,
   extractBearerOrApiKey,
@@ -1009,6 +1014,46 @@ router.post('/accounts/:index/reset', requireAdmin, async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ ok: false, code: 'ACCOUNT_RESET_ERROR', error: err.message });
+  }
+});
+
+router.get('/accounts/:index/logs', requireAdmin, async (req, res) => {
+  try {
+    const index = parseInt(req.params.index, 10);
+    const dbAcc = await db.getAccountByIndex(index);
+    const liveAcc = clusterManager.getAccount(index);
+    const now = Date.now();
+
+    const humanPaused = [];
+    for (const [phone, ts] of humanActiveChats.entries()) {
+      humanPaused.push({
+        phone,
+        paused_since: new Date(ts).toISOString(),
+        minutes_ago: Math.round((now - ts) / 60000),
+        still_active: now - ts < 15 * 60 * 1000
+      });
+    }
+
+    res.json({
+      ok: true,
+      account_index: index,
+      service_status: liveAcc?.status || dbAcc?.service_status || 'UNKNOWN',
+      phone_number: liveAcc?.phoneNumber || dbAcc?.phone_number || null,
+      is_ready: liveAcc ? liveAcc.isReady() : false,
+      human_paused_chats: humanPaused,
+      recent_events: recentAutoReplyEvents.slice(0, 40)
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, code: 'LOGS_FETCH_ERROR', error: err.message });
+  }
+});
+
+router.post('/accounts/:index/clear-human-pause', requireAdmin, async (req, res) => {
+  try {
+    clearHumanActiveChats();
+    res.json({ ok: true, message: 'Human active chat pauses cleared successfully.' });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
