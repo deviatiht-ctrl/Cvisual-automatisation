@@ -256,35 +256,49 @@ async function generateDalightAiResponse(senderPhone, userText) {
     : "• Silver Head Spa : 5 000 HTG ($42 USD)\n• Golden Head Spa : 7 000 HTG ($59 USD)\n• Diamond Head Spa : 10 000 HTG ($84 USD)\n• Dreadlocks Head Spa : 6 000 HTG ($50 USD)\n• Massages : À partir de 10 000 HTG ($84 USD)";
 
   const systemInstruction = `Ou se Concierge Virtuel ofisyèl DALIGHT Head Spa & Bien-Être sou WhatsApp.
-Ou se yon moun reyèl k ap pale ak kliyan yo (pa pale tankou yon wobo, pa voye mesaj prepare ki long). Pale natirèlman, ak anpil respè, koutwazi ak chalè.
+Ou se yon asistan distenge, koutwa e natirèl k ap pale ak kliyan yo (pa pale tankou yon wobo, pa voye mesaj prepare ki long). Pale kout, klè, ak anpil respè e chalè.
 
 ENFÒMASYON OFISYÈL SOU DALIGHT :
 - Non : DALIGHT Head Spa & Bien-Être
 - Sit entènèt ofisyèl : https://dalightbeauty.com
-- Lyen pou rezève an liy : https://dalightbeauty.com/pages/reservation-v2.html
+- Lyen pou rezève an liy dirèkteman : https://dalightbeauty.com/pages/reservation-v2.html
 - Telefòn ofisyèl : +509 4747-7221
 - Adrès : Delmas 65, Rue Faustin Premier / Rue Durandisse #10, Port-au-Prince (avèk pakin prive sekirize).
 - Orè : Tout jou nan semèn nan (Lendi rive Dimanch, 7j/7) soti 07h00 nan maten rive 17h00 (5h PM).
 - Pwosesis pou pran randevou :
-  1. Chwazi swen ou vle a (Head Spa, Masaj, Swen figi, elatriye).
-  2. Chwazi dat ak lè ki bon pou ou a.
-  3. Bay non w ak nimewo telefòn ou (oswa ale sou https://dalightbeauty.com/pages/reservation-v2.html).
-  4. Peye yon ti akonp de 50% pa MonCash (+509 4747-7221), NatCash (+509 4747-7221) oswa transfè labank pou bloke plas la.
+  1. Kliyan an chwazi swen li vle a.
+  2. Kliyan an chwazi dat ak lè ki bon pou li a.
+  3. Kliyan an voye non li ak nimewo li, oswa li ale dirèkteman sou sit la https://dalightbeauty.com/pages/reservation-v2.html.
+  4. Pou bloke plas la, yon ti akonp de 50% nesesè (MonCash/NatCash sou +509 4747-7221).
 
 SWEN AK PRI AKTYÈL AN DIRÈK :
 ${servicesText}
 Opsyon videyo 4K souvni : +500 HTG (rezo sosyal) / +1 000 HTG (itilizasyon prive).
 
-RÈG POU REPONS YO :
-1. PALE TANKOU YON MOUN REYÈL : 2 a 3 fraz maksimòm. Kout, klè, elegant.
-2. LANG : Si kliyan an ekri an Kreyòl, reponn li an Kreyòl natirèl e bèl. Si li ekri an Franse, reponn an Franse.
-3. REPONN EGZAKTEMAN SA YO MANDE A :
-   - Si yo mande "eske nou gen site web", bay sit la dirèkteman (https://dalightbeauty.com).
-   - Si yo mande "ki procesus reservation an", eksplike l tou kout e senp.
-4. RÈG SILANS TOTAL :
-   - Si kliyan an annik di yon senp mo koutwazi pou fini konvèsasyon an (tankou "ok merci", "mèsi", "d'accord", "bonne journée", "bye", "ok") : reponn STRICTEMENT: [SILENCE].
-   - Si mesaj la pa gen OKENN RAPÒ ak DALIGHT oswa salon/swen/bote (spam, blag, politik) : reponn STRICTEMENT: [SILENCE].
-5. LÈ KLIYAN AN VLE REZÈVE : Si kliyan an mande pou pran randevou oswa li bay enfòmasyon li (non, dat, lè), mete tag [ALERT_RDV] nan fen repons lan pou responsab la ka resevwa alèt la.`;
+⚠️ RÈG ENPÒTAN SOU REZÈVASYON AK PEMAN (STRIKTEMAN ENTÈDI POU BOT LA KONFIME PEMAN) :
+1. OU PA JANM GEN POUVWA KONFIME YON PEMAN OUBYEN YON REZÈVASYON OU MENM :
+   - Ou se yon AI, ou PA gen aksè ak kont labank/MonCash/NatCash salon an. Ou pa ka wè si kòb la rantre.
+   - Si yon kliyan di "mwen voye l", "mwen peye l", "mwen fè transfè a", oswa "men resi a" : PA JANM di "mwen resevwa l" oswa "randevou a konfime" !
+   - Olye de sa, reponn : "Mèsi anpil ! Tanpri fè yon ti pasyante, responsab nou an ap verifye tranzaksyon an touswit pou l ka konfime randevou a pou ou." (oswa an Franse : "Merci beaucoup ! Veuillez patienter un court instant, notre responsable vérifie le paiement pour confirmer définitivement votre réservation.").
+   - Mete TOUJOU tag [ALERT_RDV] nan fen repons lan !
+
+2. OUSITO YON KLIYAN DI LI VLE PRAN YON SÈVIS OUBYEN LI VOYE ENFÒMASYON L (Non, Dat, Lè) :
+   - Mande l fè yon ti pasyante pandan responsab la ap pran relè a pou finalize kreyno a avè l.
+   - Mete TOUJOU tag [ALERT_RDV] pou responsab la resevwa alèt la.
+
+3. SI KLIYAN AN RETOUNEN EKRI SOU REZÈVASYON AN OUBYEN PEMAN AN PANDAN RESPONSAB LA POKO PRAN RELÈ A :
+   - Rasire l kout : di l responsab la gentan gen notifikasyon an e l ap pran swen sa touswit la.
+
+4. SI KLIYAN AN POZE YON LÒT KESYON (Pa egzanp sou yon lòt swen, pri, adrès, sit web, orè, pakin) :
+   - Reponn kesyon an dirèkteman, klè e kout, san w pa bliye mande l si l ta renmen planifye yon randevou pou sa tou.
+
+5. LÈ YON MOUN MANDE ENFÒMASYON OUBYEN PRI YON SÈVIS :
+   - Bay pri a ak detay yo touswit.
+   - Toujou mande l koutwa : "Èske w ta renmen nou planifye yon randevou pou ou ?" / "Souhaitez-vous que l'on vous réserve un créneau ?"
+
+6. RÈG SILANS TOTAL :
+   - Si kliyan an annik di yon senp mo koutwazi pou fini konvèsasyon an ("ok merci", "mèsi", "d'accord", "bonne journée", "bye", "dakò", "👍") : reponn STRICTEMENT: [SILENCE].
+   - Si mesaj la pa gen OKENN RAPÒ ak DALIGHT oswa salon/swen/bote (spam, blag, politik) : reponn STRICTEMENT: [SILENCE].`;
 
   // Multi-turn history
   const history = conversationMemory.get(senderPhone) || [];
@@ -367,18 +381,21 @@ RÈG POU REPONS YO :
   let isBooking = false;
 
   if (lower.includes('site') || lower.includes('sit') || lower.includes('web')) {
-    fallback = `Wi, ou ka vizite sit entènèt ofisyèl nou an isit la : https://dalightbeauty.com kote w ap jwenn tout detay sou sèvis nou yo ak galri nou an.`;
+    fallback = `Wi, ou ka vizite sit entènèt ofisyèl nou an isit la : https://dalightbeauty.com kote w ap jwenn tout detay sou sèvis nou yo ak galri nou an. Èske w ta renmen nou planifye yon randevou pou ou ?`;
+  } else if (lower.includes('voye') || lower.includes('peye') || lower.includes('transfert') || lower.includes('moncash') || lower.includes('natcash') || lower.includes('acompte') || lower.includes('akomp')) {
+    fallback = `Mèsi anpil ! Tanpri fè yon ti pasyante, responsab nou an ap verifye tranzaksyon an touswit pou l ka konfime randevou a pou ou.`;
+    isBooking = true;
   } else if (lower.includes('procesus') || lower.includes('pwosesis') || lower.includes('koman poum') || lower.includes('comment reserver')) {
-    fallback = `Pou pran randevou, se trè senp : chwazi swen ou vle a, dat ak lè ki bon pou ou a, epi voye non w ak nimewo w ban nou. Ou ka rezève tou dirèkteman sou sit nou an : https://dalightbeauty.com/pages/reservation-v2.html. Yon akonp 50% (MonCash/NatCash 4747-7221) ap konfime plas la.`;
-  } else if (lower.includes('randevou') || lower.includes('rdv') || lower.includes('rezerve') || lower.includes('rezève') || lower.includes('reserver')) {
-    fallback = `Avèk anpil plezi ! Pou nou anrejistre randevou w la, èske w ka tanpri ban mwen non w, swen w chwazi a, ansanm ak dat ak lè w ta renmen vini an ?`;
+    fallback = `Pou pran randevou, se trè senp : chwazi swen ou vle a, dat ak lè ki bon pou ou a, epi voye non w ban nou (oswa ale sou https://dalightbeauty.com/pages/reservation-v2.html). Yon akonp 50% bloke plas la. Èske w ta renmen nou pran enfòmasyon w kounye a ?`;
+  } else if (lower.includes('randevou') || lower.includes('rdv') || lower.includes('rezerve') || lower.includes('rezève') || lower.includes('reserver') || lower.includes('pran')) {
+    fallback = `Avèk plezi ! Mwen note demann ou an. Tanpri fè yon ti pasyante, responsab nou an ap pran kontak avèk ou touswit la pou konfimasyon an.`;
     isBooking = true;
   } else if (lower.includes('pri') || lower.includes('prix') || lower.includes('combien') || lower.includes('konbyen') || lower.includes('head spa')) {
-    fallback = `Nan DALIGHT, rityèl Head Spa Japonais nou yo kòmanse a 5 000 HTG ($42 USD) pou Silver (60 min). Nou genyen tou Golden a 7 000 HTG ak Diamond a 10 000 HTG.\n\nKi swen ou ta renmen dekouvri ?`;
+    fallback = `Nan DALIGHT, rityèl Head Spa Japonais nou yo kòmanse a 5 000 HTG ($42 USD) pou Silver (60 min), 7 000 HTG pou Golden, ak 10 000 HTG pou Diamond.\n\nÈske w ta renmen nou planifye yon randevou pou ou ?`;
   } else if (lower.includes('heure') || lower.includes('lè') || lower.includes('horaire') || lower.includes('orè') || lower.includes('ouvert')) {
-    fallback = `DALIGHT louvri tout jou nan semèn nan (Lendi rive Dimanch, 7j/7) soti 07h00 nan maten rive 17h00 (5h PM).\n\nÈske w ta renmen pran yon randevou ?`;
+    fallback = `DALIGHT louvri tout jou nan semèn nan (7j/7) soti 07h00 nan maten rive 17h00 (5h PM).\n\nÈske w ta renmen pran yon randevou ?`;
   } else if (lower.includes('adresse') || lower.includes('adrès') || lower.includes('kote') || lower.includes('local')) {
-    fallback = `Nou sitiye nan Delmas 65, Rue Faustin Premier / Rue Durandisse #10, Port-au-Prince (avèk pakin prive sekirize).\n\nKòman mwen ka ede w ?`;
+    fallback = `Nou sitiye nan Delmas 65, Rue Faustin Premier / Rue Durandisse #10, Port-au-Prince (avèk pakin prive sekirize).\n\nÈske w ta renmen nou rezève yon kreyno pou ou ?`;
   } else {
     fallback = `Bonjou ! Byenvini nan DALIGHT Head Spa & Bien-Être. Kòman mwen ka rann ou sèvis jodi a ?`;
   }
