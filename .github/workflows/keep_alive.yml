@@ -1,0 +1,23 @@
+name: Cloud Gateway Keep-Alive Ping
+
+on:
+  schedule:
+    # Runs every 10 minutes 24/7 to prevent Render free instance from sleeping
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  keep_alive:
+    name: Ping Gateway Health
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping CVISUAL WhatsApp Gateway on Render
+        run: |
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" --max-time 30 "https://cvisual-whatsapp-gateway.onrender.com/health")
+          echo "$RESPONSE"
+          STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS" | cut -d':' -f2)
+          if [ "$STATUS" = "200" ]; then
+            echo "Gateway is HEALTHY and AWAKE (200 OK)"
+          else
+            echo "Warning: Received status $STATUS"
+          fi
