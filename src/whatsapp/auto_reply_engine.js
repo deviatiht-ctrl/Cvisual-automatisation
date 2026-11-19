@@ -13,6 +13,9 @@ const conversationMemory = new Map();
 // Human takeover tracker: senderPhone -> timestamp (ms) when a human manager sent a message to this client
 export const humanActiveChats = new Map();
 
+// Track message IDs sent programmatically by this bot server to prevent self-takeover
+export const botSentMessageIds = new Set();
+
 // Ring buffer of recent auto-reply actions & decisions for live diagnostics
 export const recentAutoReplyEvents = [];
 
@@ -431,12 +434,25 @@ export async function handleIncomingMessageAutoReply({ accountInstance, sock, me
     const rawRemoteJid = msg.key?.remoteJid;
     if (!rawRemoteJid) continue;
 
+    const textPreview = extractMessageText(msg.message);
     const msgTs = Number(msg.messageTimestamp?.low ?? msg.messageTimestamp ?? nowSec);
     const isRecentRealtime = Math.abs(nowSec - msgTs) <= 45;
 
+    logAutoReplyEvent({
+      action: 'INCOMING_FRAME',
+      fromMe: Boolean(msg.key?.fromMe),
+      remoteJid: rawRemoteJid,
+      msgId: msg.key?.id,
+      text: textPreview ? textPreview.slice(0, 50) : null
+    });
+
     // 🌟 1. HUMAN TAKEOVER DETECTION (FromMe === true)
-    // ONLY pause AI if the message was sent RIGHT NOW in real-time, NEVER for historical sync messages!
+    // Ignore messages sent programmatically by the bot server!
     if (msg.key?.fromMe) {
+      if (msg.key?.id && botSentMessageIds.has(msg.key.id)) {
+        botSentMessageIds.delete(msg.key.id);
+        continue;
+      }
       if (rawRemoteJid.endsWith('@s.whatsapp.net') && isRecentRealtime) {
         const clientUser = jidNormalizedUser(rawRemoteJid);
         const clientPhone = clientUser.split('@')[0].replace(/\D/g, '');
@@ -561,6 +577,11 @@ export async function handleIncomingMessageAutoReply({ accountInstance, sock, me
 
       // Record sent reply in account's in-memory messages store
       if (sent?.key?.id) {
+        botSentMessageIds.add(sent.key.id);
+        if (botSentMessageIds.size > 5000) {
+          const first = botSentMessageIds.values().next().value;
+          botSentMessageIds.delete(first);
+        }
         accountInstance._recordWaMessage({
           key: {
             remoteJid,

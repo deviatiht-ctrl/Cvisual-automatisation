@@ -19,7 +19,7 @@ import { db } from '../database.js';
 import { config } from '../config.js';
 import { applySpintaxAndHashShield } from '../shield.js';
 import { sessionStore } from './session_store.js';
-import { handleIncomingMessageAutoReply } from './auto_reply_engine.js';
+import { handleIncomingMessageAutoReply, botSentMessageIds } from './auto_reply_engine.js';
 
 const silentPinoLogger = pino({ level: 'silent' });
 const FALLBACK_WA_VERSION = [2, 3000, 1054146148];
@@ -926,6 +926,9 @@ export class WhatsAppAccountInstance extends EventEmitter {
           });
         } else {
           sentResult = await sock.sendMessage(targetJid, { text: finalMessageText });
+        }
+        if (sentResult?.key?.id) {
+          botSentMessageIds.add(sentResult.key.id);
         }
       } catch (sendErr) {
         const errMsg = sendErr?.message ? sendErr.message : String(sendErr);
