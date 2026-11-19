@@ -985,7 +985,11 @@ router.get('/accounts/:index/qr', requireAdmin, async (req, res) => {
   try {
     const index = parseInt(req.params.index, 10);
     const dbAcc = await db.getAccountByIndex(index);
-    const liveAcc = clusterManager.getAccount(index);
+    let liveAcc = clusterManager.getAccount(index);
+
+    if (!liveAcc && dbAcc && dbAcc.is_enabled !== false) {
+      liveAcc = await clusterManager.registerAndStartAccount(index, dbAcc.label, { userTriggered: true });
+    }
 
     if (!dbAcc && !liveAcc) {
       return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: `Account line ${index} not found.` });
@@ -1004,6 +1008,22 @@ router.get('/accounts/:index/qr', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ ok: false, code: 'QR_FETCH_ERROR', error: err.message });
+  }
+});
+
+router.post('/accounts/:index/start', requireAdmin, async (req, res) => {
+  try {
+    const index = parseInt(req.params.index, 10);
+    const dbAcc = await db.getAccountByIndex(index);
+    const liveAcc = await clusterManager.registerAndStartAccount(index, dbAcc?.label, { userTriggered: true });
+    res.json({
+      ok: true,
+      account_index: index,
+      service_status: liveAcc?.status || 'INITIALIZING',
+      is_ready: liveAcc ? liveAcc.isReady() : false
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, code: 'ACCOUNT_START_ERROR', error: err.message });
   }
 });
 

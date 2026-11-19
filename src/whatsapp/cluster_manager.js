@@ -107,13 +107,14 @@ export class ClusterManager {
 
     const backedUpIndices = await sessionStore.listBackedUpIndices().catch(() => new Set());
 
-    // Always start the primary line, plus any additional enabled line that already has a saved registered session
-    const toStart = [primary];
+    // Start all enabled accounts up to maxConcurrentAccounts (including DALIGHT dedicated lines)
+    const toStart = [];
+    if (primary && !enabled.some(a => a.account_index === primary.account_index)) {
+      toStart.push(primary);
+    }
     for (const acc of enabled) {
       if (toStart.length >= config.maxConcurrentAccounts) break;
-      if (acc.account_index === primary.account_index) continue;
-      const localPath = path.join(config.authDataDir, `baileys-account-${acc.account_index}`);
-      if (backedUpIndices.has(acc.account_index) || sessionStore.hasLocalSession(localPath)) {
+      if (!toStart.some(a => a.account_index === acc.account_index)) {
         toStart.push(acc);
       }
     }
