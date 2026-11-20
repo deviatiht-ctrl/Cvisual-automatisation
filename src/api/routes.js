@@ -4,6 +4,7 @@ import { clusterManager, deliverWebhook } from '../whatsapp/cluster_manager.js';
 import { normalizePhoneDigits } from '../whatsapp/account_instance.js';
 import {
   DALIGHT_CONCIERGE_CONFIG,
+  getDalightGeminiConfig,
   recentAutoReplyEvents,
   humanActiveChats,
   clearHumanActiveChats
@@ -234,9 +235,16 @@ router.get('/me', authenticateApiKey, async (req, res) => {
       req.tenant.id === 'c21aa659-f837-4c81-9e55-ccef534f9420' ||
       (req.tenant.name && req.tenant.name.toLowerCase().includes('dalight')) ||
       tenantDedicated.includes(3);
+    let dalightAutoReplyEnabled = true;
+    if (isDalight) {
+      const dConfig = await getDalightGeminiConfig();
+      if (dConfig?.autoreply === false || dConfig?.enabled === false) {
+        dalightAutoReplyEnabled = false;
+      }
+    }
     const autoReply =
       tenantMeta?.auto_reply ||
-      (isDalight ? { enabled: true, ...DALIGHT_CONCIERGE_CONFIG } : { enabled: false });
+      (isDalight ? { enabled: dalightAutoReplyEnabled, ...DALIGHT_CONCIERGE_CONFIG } : { enabled: false });
 
     res.json({
       ok: true,
@@ -1749,11 +1757,19 @@ router.get('/admin/tenants/:id/auto-reply', requireAdmin, async (req, res) => {
       (tenant.name && tenant.name.toLowerCase().includes('dalight')) ||
       (tenant.dedicated_account_indices && tenant.dedicated_account_indices.includes(3));
 
+    let dalightAutoReplyEnabled = true;
+    if (isDalight) {
+      const dConfig = await getDalightGeminiConfig();
+      if (dConfig?.autoreply === false || dConfig?.enabled === false) {
+        dalightAutoReplyEnabled = false;
+      }
+    }
+
     const autoReply =
       meta.auto_reply ||
       (isDalight
         ? {
-            enabled: true,
+            enabled: dalightAutoReplyEnabled,
             business_name: DALIGHT_CONCIERGE_CONFIG.business_name,
             alert_phone: DALIGHT_CONCIERGE_CONFIG.alert_phone,
             booking_url: DALIGHT_CONCIERGE_CONFIG.booking_url,

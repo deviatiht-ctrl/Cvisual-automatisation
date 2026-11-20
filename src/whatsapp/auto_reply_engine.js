@@ -188,31 +188,46 @@ async function getLiveDalightServices() {
   return cachedServices || [];
 }
 
-async function getDalightGeminiKey() {
+let cachedGeminiConfig = null;
+let lastConfigFetch = 0;
+
+export async function getDalightGeminiConfig() {
   const now = Date.now();
-  if (cachedGeminiKey && now - lastKeyFetch < 300000) {
-    return cachedGeminiKey;
+  // Fast 5-second cache to react immediately when toggled in DALIGHT Admin
+  if (cachedGeminiConfig && (now - lastConfigFetch < 5000)) {
+    return cachedGeminiConfig;
   }
   try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
     const res = await fetch(`${DALIGHT_SUPABASE_URL}/rest/v1/settings?key=eq.gemini_config`, {
       headers: {
         apikey: DALIGHT_SUPABASE_ANON,
         Authorization: `Bearer ${DALIGHT_SUPABASE_ANON}`
-      }
+      },
+      signal: controller.signal
     });
+    clearTimeout(timer);
     if (res.ok) {
       const data = await res.json();
-      const key = data?.[0]?.value?.api_key;
-      if (key) {
-        cachedGeminiKey = key;
-        lastKeyFetch = now;
-        return cachedGeminiKey;
+      if (Array.isArray(data) && data.length > 0) {
+        const val = typeof data[0].value === 'string' ? JSON.parse(data[0].value) : (data[0].value || {});
+        cachedGeminiConfig = val;
+        lastConfigFetch = now;
+        if (val.api_key) cachedGeminiKey = val.api_key;
+        return cachedGeminiConfig;
       }
     }
   } catch (err) {
-    console.warn('[AutoReply DALIGHT] Gemini key fetch error:', err.message);
+    console.warn('[AutoReply DALIGHT] Gemini config live fetch error:', err.message);
   }
-  return cachedGeminiKey || process.env.GEMINI_API_KEY || '';
+  return cachedGeminiConfig || {};
+}
+
+async function getDalightGeminiKey() {
+  const cfg = await getDalightGeminiConfig();
+  if (cfg?.api_key) return cfg.api_key;
+  return process.env.GEMINI_API_KEY || '';
 }
 
 /**
@@ -444,7 +459,21 @@ export async function handleIncomingMessageAutoReply({ accountInstance, sock, me
   }
 
   const customAutoReply = tenantMeta?.auto_reply || null;
-  const isAutoReplyEnabled = isDalight ? (customAutoReply?.enabled !== false) : Boolean(customAutoReply?.enabled);
+
+  let isAutoReplyEnabled = false;
+  if (isDalight) {
+    const dalightConfig = await getDalightGeminiConfig();
+    const isDalightConfigDisabled = (dalightConfig?.autoreply === false || dalightConfig?.enabled === false);
+    const isTenantMetaDisabled = (customAutoReply?.enabled === false);
+
+    if (isDalightConfigDisabled || isTenantMetaDisabled) {
+      isAutoReplyEnabled = false;
+    } else {
+      isAutoReplyEnabled = true;
+    }
+  } else {
+    isAutoReplyEnabled = Boolean(customAutoReply?.enabled);
+  }
 
   for (const msg of messages) {
     if (!msg || !msg.message) continue;
